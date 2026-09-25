@@ -1,0 +1,178 @@
+/* 主题主色：#303030（Arco 定义在 body 上，须同选择器覆盖） */
+body {
+  --primary-1: 244, 244, 244;
+  --primary-2: 229, 229, 229;
+  --primary-3: 201, 201, 201;
+  --primary-4: 158, 158, 158;
+  --primary-5: 91, 91, 91;
+  --primary-6: 48, 48, 48;
+  --primary-7: 41, 41, 41;
+  --primary-8: 33, 33, 33;
+  --primary-9: 24, 24, 24;
+  --primary-10: 15, 15, 15;
+}
+
+/* 侧边菜单背景与侧栏一致；未激活项同背景，仅激活项有底色 */
+.arco-menu,
+.arco-menu-light {
+  background: transparent !important;
+}
+
+.arco-menu-light .arco-menu-item,
+.arco-menu-light .arco-menu-group-title,
+.arco-menu-light .arco-menu-pop-header,
+.arco-menu-light .arco-menu-inline-header {
+  background-color: transparent !important;
+}
+
+.arco-menu-light .arco-menu-item:hover {
+  background-color: #f1f0ec !important;
+}
+
+.arco-menu-light .arco-menu-item.arco-menu-selected {
+  background-color: #EEEDEC !important;
+  font-weight: 600;
+}
+
+/* 无边框窗口控制按钮：悬浮右上角，压在页面标题行上 */
+.win-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  height: 40px;
+}
+
+.win-btn {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #5b5b5b;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+}
+
+.win-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #303030;
+}
+
+.win-btn:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.win-btn-close:active {
+  background: #c50f1f;
+  color: #fff;
+}
+
+/* 菜单项更矮 + 圆角 */
+.arco-menu-light .arco-menu-item {
+  height: 36px;
+  line-height: 36px;
+  margin: 2px 8px;
+  border-radius: 8px;
+}
+
+.app-logo {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-1);
+}
+
+.arco-layout-sider-light,
+.arco-layout-sider-dark {
+  box-shadow: none !important;
+}
+
+.arco-card-body {
+  padding-top: 8px !important;
+}
+
+.arco-layout-content > .arco-card {
+  border-radius: 8px;
+  height: 100%;
+}
+
+/* 设置页：卡片内部滚动，标题固定 */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-card > .arco-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-card .settings-title {
+  flex-shrink: 0;
+}
+
+.settings-card .arco-tabs {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 设置页：每行 2 个表单项 */
+.settings-grid .arco-tabs-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 32px;
+  align-content: start;
+}
+
+/* 分区标题独占一行 */
+.settings-grid .arco-tabs-pane .arco-divider {
+  grid-column: 1 / -1;
+}
+
+/* 纯图标按钮：透明底 + 深灰图标 */
+.arco-btn-icon-only {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 10px;
+  color: #4b4b4b !important;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.arco-btn-icon-only:hover:not(.arco-btn-disabled) {
+  background: var(--color-fill-2, rgba(0, 0, 0, 0.06)) !important;
+  color: #4da3e8 !important;
+}
+
+/* 置顶激活态：与 hover 同款高亮 */
+.arco-btn-icon-only.embed-top-active:not(.arco-btn-disabled) {
+  background: var(--color-fill-2, rgba(0, 0, 0, 0.06)) !important;
+  color: #4da3e8 !important;
+}
+
+.arco-btn-icon-only:active:not(.arco-btn-disabled) {
+  background: var(--color-fill-3, rgba(0, 0, 0, 0.1)) !important;
+  color: #3b8ed4 !important;
+}
+
+.arco-btn-icon-only.arco-btn-loading,
+.arco-btn-icon-only.arco-btn-disabled {
+  color: var(--color-text-4, #c9c9c9) !important;
+}

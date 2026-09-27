@@ -1,4 +1,5 @@
-package main
+// Package terminal 设备交互终端：adb shell -tt 流式会话。
+package terminal
 
 import (
 	"bufio"
@@ -7,11 +8,10 @@ import (
 	"io"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"andmaid/internal/adb"
 )
 
 // 设备终端：交互式 adb shell。
@@ -20,24 +20,9 @@ import (
 // 每台设备同时只保留一个 shell 会话；会话有唯一 ID，重启即换新 ID，
 // 前端按 ID 过滤事件，旧会话的退出事件不会污染新会话。
 
-type shellProc struct {
-	id     string
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	cancel context.CancelFunc
-	done   chan struct{} // 关闭表示进程已退出
-}
-
-var (
-	shellMu    sync.Mutex
-	shellProcs = make(map[string]*shellProc)
-	shellSeq   int
-	writeMu    sync.Mutex // 串行化 stdin 写入
-)
-
 // StartShell 启动设备交互 shell（已存在则先终止旧的），返回会话 ID。
 // rows/cols 为前端终端尺寸，用于设备端 stty，保证长行正确折行。
-func (a *App) StartShell(serial string, rows int, cols int) (string, error) {
+func (m *Manager) StartShell(serial string, rows int, cols int) (string, error) {
 	serial = strings.TrimSpace(serial)
 	if serial == "" {
 		return "", fmt.Errorf("设备序列号不能为空")
@@ -48,65 +33,65 @@ func (a *App) StartShell(serial string, rows int, cols int) (string, error) {
 	if cols <= 0 {
 		cols = 80
 	}
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return "", err
 	}
 
 	// 旧的还活着先停
-	_ = a.stopShell(serial, true)
+	_ = m.stopShell(serial, true)
 
-	shellMu.Lock()
-	adb := a.adbPath()
+	m.mu.Lock()
+	adb := adb.AdbPath()
 	// -tt 强制设备端 pty：有回显、颜色、光标控制；stty 同步尺寸后 exec 换正式 shell
 	sizeCmd := fmt.Sprintf("stty rows %d cols %d; exec sh", rows, cols)
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel := context.WithCancel(m.ctx)
 	cmd := exec.CommandContext(ctx, adb, "-s", serial, "shell", "-tt", sizeCmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		shellMu.Unlock()
+		m.mu.Unlock()
 		return "", fmt.Errorf("打开 shell stdin 失败: %v", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		shellMu.Unlock()
+		m.mu.Unlock()
 		return "", fmt.Errorf("打开 shell stdout 失败: %v", err)
 	}
-	shellSeq++
+	m.seq++
 	p := &shellProc{
-		id:     fmt.Sprintf("%s#%d", serial, shellSeq),
+		id:     fmt.Sprintf("%s#%d", serial, m.seq),
 		cmd:    cmd,
 		stdin:  stdin,
 		cancel: cancel,
 		done:   make(chan struct{}),
 	}
-	shellProcs[serial] = p
-	shellMu.Unlock()
+	m.procs[serial] = p
+	m.mu.Unlock()
 
 	if err := cmd.Start(); err != nil {
-		shellMu.Lock()
-		if cur, ok := shellProcs[serial]; ok && cur == p {
-			delete(shellProcs, serial)
+		m.mu.Lock()
+		if cur, ok := m.procs[serial]; ok && cur == p {
+			delete(m.procs, serial)
 		}
-		shellMu.Unlock()
+		m.mu.Unlock()
 		cancel()
 		return "", fmt.Errorf("启动 adb shell 失败: %v", err)
 	}
 
 	// 输出流：UTF-8 边界安全地推给前端
-	go a.pumpShellOutput(serial, p, stdout)
+	go m.pumpShellOutput(serial, p, stdout)
 
 	// 退出清理
 	go func() {
 		_ = cmd.Wait()
 		close(p.done)
-		shellMu.Lock()
-		if cur, ok := shellProcs[serial]; ok && cur == p {
-			delete(shellProcs, serial)
+		m.mu.Lock()
+		if cur, ok := m.procs[serial]; ok && cur == p {
+			delete(m.procs, serial)
 		}
-		shellMu.Unlock()
-		runtime.EventsEmit(a.ctx, "shell:exit", map[string]string{
+		m.mu.Unlock()
+		m.emit("shell:exit", map[string]string{
 			"serial": serial,
 			"id":     p.id,
 		})
@@ -117,15 +102,15 @@ func (a *App) StartShell(serial string, rows int, cols int) (string, error) {
 }
 
 // WriteShell 向设备 shell 的 stdin 写数据（按键、粘贴、快捷命令）
-func (a *App) WriteShell(serial string, data string) error {
-	shellMu.Lock()
-	p, ok := shellProcs[serial]
-	shellMu.Unlock()
+func (m *Manager) WriteShell(serial string, data string) error {
+	m.mu.Lock()
+	p, ok := m.procs[serial]
+	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("设备 %s shell 未运行", serial)
 	}
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
 	_, err := io.WriteString(p.stdin, data)
 	if err != nil {
 		return fmt.Errorf("写入 shell 失败: %v", err)
@@ -134,37 +119,37 @@ func (a *App) WriteShell(serial string, data string) error {
 }
 
 // StopShell 终止设备 shell 会话
-func (a *App) StopShell(serial string) error {
-	return a.stopShell(strings.TrimSpace(serial), false)
+func (m *Manager) StopShell(serial string) error {
+	return m.stopShell(strings.TrimSpace(serial), false)
 }
 
 // StopShellSession 仅当设备当前会话 ID 等于 expectID 时终止；
 // 不匹配（已被新会话替换/已退出）静默成功——防止旧请求误杀新会话
-func (a *App) StopShellSession(serial string, expectID string) error {
+func (m *Manager) StopShellSession(serial string, expectID string) error {
 	serial = strings.TrimSpace(serial)
-	shellMu.Lock()
-	p, ok := shellProcs[serial]
-	shellMu.Unlock()
+	m.mu.Lock()
+	p, ok := m.procs[serial]
+	m.mu.Unlock()
 	if !ok || p.id != expectID {
 		return nil
 	}
-	return a.stopShell(serial, false)
+	return m.stopShell(serial, false)
 }
 
 // ShellAlive 设备 shell 是否在运行
-func (a *App) ShellAlive(serial string) bool {
-	shellMu.Lock()
-	defer shellMu.Unlock()
-	_, ok := shellProcs[strings.TrimSpace(serial)]
+func (m *Manager) ShellAlive(serial string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.procs[strings.TrimSpace(serial)]
 	return ok
 }
 
 // ---------- 内部 ----------
 
-func (a *App) stopShell(serial string, quiet bool) error {
-	shellMu.Lock()
-	p, ok := shellProcs[serial]
-	shellMu.Unlock()
+func (m *Manager) stopShell(serial string, quiet bool) error {
+	m.mu.Lock()
+	p, ok := m.procs[serial]
+	m.mu.Unlock()
 	if !ok {
 		if quiet {
 			return nil
@@ -181,7 +166,7 @@ func (a *App) stopShell(serial string, quiet bool) error {
 }
 
 // pumpShellOutput 读 adb 输出并按 UTF-8 字符边界切块推送给前端
-func (a *App) pumpShellOutput(serial string, p *shellProc, r io.Reader) {
+func (m *Manager) pumpShellOutput(serial string, p *shellProc, r io.Reader) {
 	reader := bufio.NewReaderSize(r, 4096)
 	var pending []byte
 	buf := make([]byte, 4096)
@@ -192,7 +177,7 @@ func (a *App) pumpShellOutput(serial string, p *shellProc, r io.Reader) {
 			// 只 flush 完整 UTF-8 序列，残缺尾部留给下一轮
 			cut := utf8Cut(pending)
 			if cut > 0 {
-				runtime.EventsEmit(a.ctx, "shell:data", map[string]string{
+				m.emit("shell:data", map[string]string{
 					"serial": serial,
 					"id":     p.id,
 					"data":   string(pending[:cut]),
@@ -202,7 +187,7 @@ func (a *App) pumpShellOutput(serial string, p *shellProc, r io.Reader) {
 		}
 		if err != nil {
 			if len(pending) > 0 {
-				runtime.EventsEmit(a.ctx, "shell:data", map[string]string{
+				m.emit("shell:data", map[string]string{
 					"serial": serial,
 					"id":     p.id,
 					"data":   string(pending),

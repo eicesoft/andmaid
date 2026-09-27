@@ -28,7 +28,6 @@ func parseArgs() {
 func main() {
 	parseArgs()
 
-	// Create an instance of the app structure
 	app := NewApp()
 
 	title := "Andmaid"
@@ -36,7 +35,6 @@ func main() {
 		title = fmt.Sprintf("Andmaid 内嵌投屏 - %s", embedFlag)
 	}
 
-	// Create application with options
 	err := wails.Run(&options.App{
 		Title:     title,
 		Width:     1024,

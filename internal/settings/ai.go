@@ -1,4 +1,4 @@
-package main
+package settings
 
 import (
 	"encoding/json"
@@ -7,18 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 )
+
 // AI 服务接口参数设置，与 scrcpy 设置分开存（ai.json）。
 // BaseURL 可为空：空时默认 https://api.openai.com/v1。
 
 type AISettings struct {
-	BaseURL      string `json:"baseUrl"`      // OpenAI 兼容接口地址，空 = https://api.openai.com/v1
-	APIKey       string `json:"apiKey"`       // API Key
-	Model        string `json:"model"`        // 模型名，如 gpt-4o-mini
-	Temperature  *float64 `json:"temperature"` // 采样温度，nil = 不传
-	SystemPrompt string `json:"systemPrompt"` // 附加系统提示词（拼在设备信息后）
+	BaseURL      string   `json:"baseUrl"`      // OpenAI 兼容接口地址，空 = https://api.openai.com/v1
+	APIKey       string   `json:"apiKey"`       // API Key
+	Model        string   `json:"model"`        // 模型名，如 gpt-4o-mini
+	Temperature  *float64 `json:"temperature"`  // 采样温度，nil = 不传
+	SystemPrompt string   `json:"systemPrompt"` // 附加系统提示词（拼在设备信息后）
 }
 
-func aiSettingsPath() string {
+func aiPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		dir = "."
@@ -26,9 +27,10 @@ func aiSettingsPath() string {
 	return filepath.Join(dir, "andmaid", "ai.json")
 }
 
-func LoadAISettings() (*AISettings, error) {
+// LoadAI 读取 AI 设置，不存在时返回默认值。
+func LoadAI() (*AISettings, error) {
 	s := &AISettings{}
-	data, err := os.ReadFile(aiSettingsPath())
+	data, err := os.ReadFile(aiPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -50,19 +52,12 @@ func (s *AISettings) BaseURLNorm() string {
 	return u
 }
 
-// GetAISettings 供前端读取 AI 设置；APIKey 原样返回（本地单机应用）
-func (a *App) GetAISettings() (*AISettings, error) {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	return LoadAISettings()
-}
+// SaveAI 原子写入 AI 设置
+func SaveAI(s *AISettings) error {
+	mu.Lock()
+	defer mu.Unlock()
 
-// SaveAISettings 供前端保存 AI 设置
-func (a *App) SaveAISettings(s *AISettings) error {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-
-	p := aiSettingsPath()
+	p := aiPath()
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}

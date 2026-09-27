@@ -1,24 +1,26 @@
-package main
+// Package device 设备管理：adb 设备枚举、应用/编码器查询、scrcpy 投屏进程生命周期。
+package device
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"andmaid/internal/adb"
+	"andmaid/internal/settings"
 )
 
+// Device 一台通过 adb 可见的设备
 type Device struct {
 	Serial string `json:"serial"`
 	State  string `json:"state"`
 	Model  string `json:"model"`
 }
 
+// ScrcpyProcess 一个 scrcpy 投屏会话
 type ScrcpyProcess struct {
 	Serial    string    `json:"serial"`
 	SessionID string    `json:"sessionId"` // 会话唯一 ID（serial#n），支持同设备多开
@@ -37,55 +39,51 @@ type AndroidApp struct {
 
 // VideoEncoder 设备上可用的一个视频编码器（scrcpy --list-encoders）
 type VideoEncoder struct {
-	Codec   string `json:"codec"`   // --video-codec，如 h264
-	Name    string `json:"name"`    // --video-encoder，MediaCodec 编码器名
-	Hardware bool  `json:"hardware"`
-	Alias   bool   `json:"alias"`   // 是否为别名行（指向同名真实编码器）
+	Codec    string `json:"codec"` // --video-codec，如 h264
+	Name     string `json:"name"`  // --video-encoder，MediaCodec 编码器名
+	Hardware bool   `json:"hardware"`
+	Alias    bool   `json:"alias"` // 是否为别名行（指向同名真实编码器）
 }
 
-var (
-	adbMu         sync.Mutex
-	screenMu      sync.Mutex
-	scrcpyProcs   = make(map[string]*ScrcpyProcess) // key: sessionID
-	sessionSeq    = 0
-	binDir        string
-)
+// Manager 管理设备查询与 scrcpy 投屏进程。Wails 绑定后方法直接暴露给前端。
+type Manager struct {
+	ctx      context.Context // nil 时输出走 Background
+	adbMu    sync.Mutex
+	screenMu sync.Mutex
+	procs    map[string]*ScrcpyProcess // key: sessionID
+	seq      int
+}
 
-func init() {
-	if exe, err := os.Executable(); err == nil {
-		binDir = filepath.Dir(exe)
+// NewManager 创建设备管理器。Startup 后调用 SetContext。
+func NewManager() *Manager {
+	return &Manager{procs: make(map[string]*ScrcpyProcess)}
+}
+
+// SetContext 注入 Wails runtime context（EventsEmit 用）
+func (m *Manager) SetContext(ctx context.Context) { m.ctx = ctx }
+
+func (m *Manager) emit(event string, data ...interface{}) {
+	if m.ctx != nil {
+		m.emit(event, data...)
 	}
 }
 
 // runAdb 执行 adb 命令返回合并输出
-// 先确保 adb server 就绪（避免与 scrcpy 内部的 adb start-server 竞态），
-// daemon 级错误自动重启 server 并重试一次
-func (a *App) runAdb(args ...string) (string, error) {
-	return a.runAdbTimeout(10*time.Second, args...)
+func (m *Manager) runAdb(args ...string) (string, error) {
+	return adb.Exec(args...)
 }
 
 // runAdbTimeout 同 runAdb，自定义超时
-func (a *App) runAdbTimeout(timeout time.Duration, args ...string) (string, error) {
-	if err := a.ensureAdbServer(); err != nil {
-		return "", err
-	}
-	out, err := a.execAdbTimeout(timeout, args...)
-	if err != nil && isAdbDaemonError(out) {
-		invalidateAdbServer()
-		if err2 := a.ensureAdbServer(); err2 != nil {
-			return out, err
-		}
-		out, err = a.execAdbTimeout(timeout, args...)
-	}
-	return out, err
+func (m *Manager) runAdbTimeout(timeout time.Duration, args ...string) (string, error) {
+	return adb.ExecTimeout(timeout, args...)
 }
 
 // ListDevices 返回通过 adb 看到的设备列表
-func (a *App) ListDevices() ([]Device, error) {
-	adbMu.Lock()
-	defer adbMu.Unlock()
+func (m *Manager) ListDevices() ([]Device, error) {
+	m.adbMu.Lock()
+	defer m.adbMu.Unlock()
 
-	out, err := a.runAdb("devices", "-l")
+	out, err := m.runAdb("devices", "-l")
 	if err != nil {
 		return nil, fmt.Errorf("adb 执行失败: %v\n%s", err, out)
 	}
@@ -112,67 +110,67 @@ func (a *App) ListDevices() ([]Device, error) {
 }
 
 // OpenScreen 打开指定设备的 scrcpy 投屏窗口（同设备仅一个普通投屏，重复点击报错）
-func (a *App) OpenScreen(serial string) error {
-	return a.startScrcpy(serial, nil, "", true)
+func (m *Manager) OpenScreen(serial string) error {
+	return m.startScrcpy(serial, nil, "", true)
 }
 
 // OpenAppScreen 打开投屏并启动指定应用（scrcpy --start-app=<pkg>）。
 // 每次调用新开一个投屏窗口；配合 --new-display 虚拟显示器，同设备同应用可多开。
-func (a *App) OpenAppScreen(serial string, pkg string) error {
+func (m *Manager) OpenAppScreen(serial string, pkg string) error {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
 		return fmt.Errorf("应用包名不能为空")
 	}
-	return a.startScrcpy(serial, []string{"--start-app=" + pkg}, pkg, false)
+	return m.startScrcpy(serial, []string{"--start-app=" + pkg}, pkg, false)
 }
 
 // OpenAppScreenOnMain 同 OpenAppScreen，但镜像主屏（不加 --new-display）。
 // Agent 用：input tap / uiautomator dump 只作用于主屏，虚拟屏应用不可见。
-func (a *App) OpenAppScreenOnMain(serial string, pkg string) error {
+func (m *Manager) OpenAppScreenOnMain(serial string, pkg string) error {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
 		return fmt.Errorf("应用包名不能为空")
 	}
-	return a.startScrcpyMain(serial, []string{"--start-app=" + pkg}, pkg, false)
+	return m.startScrcpyMain(serial, []string{"--start-app=" + pkg}, pkg, false)
 }
 
 // startScrcpy 启动 scrcpy 投屏；extra 为附加参数（如 --start-app）。
 // exclusive=true：同设备已有运行中的投屏则报错（普通投屏）；false：多开新会话。
 // noVirtualDisplay=true：跳过 --new-display 自动注入，镜像主屏（Agent 用）。
-func (a *App) startScrcpy(serial string, extra []string, lockedPkg string, exclusive bool) error {
-	return a.startScrcpyOpts(serial, extra, lockedPkg, exclusive, false)
+func (m *Manager) startScrcpy(serial string, extra []string, lockedPkg string, exclusive bool) error {
+	return m.startScrcpyOpts(serial, extra, lockedPkg, exclusive, false)
 }
 
-func (a *App) startScrcpyMain(serial string, extra []string, lockedPkg string, exclusive bool) error {
-	return a.startScrcpyOpts(serial, extra, lockedPkg, exclusive, true)
+func (m *Manager) startScrcpyMain(serial string, extra []string, lockedPkg string, exclusive bool) error {
+	return m.startScrcpyOpts(serial, extra, lockedPkg, exclusive, true)
 }
 
-func (a *App) startScrcpyOpts(serial string, extra []string, lockedPkg string, exclusive bool, noVirtualDisplay bool) error {
-	screenMu.Lock()
-	defer screenMu.Unlock()
+func (m *Manager) startScrcpyOpts(serial string, extra []string, lockedPkg string, exclusive bool, noVirtualDisplay bool) error {
+	m.screenMu.Lock()
+	defer m.screenMu.Unlock()
 
 	if exclusive {
-		for _, p := range scrcpyProcs {
+		for _, p := range m.procs {
 			if p.Serial == serial && p.cmd.ProcessState == nil {
 				return fmt.Errorf("设备 %s 投屏已在运行", serial)
 			}
 		}
 	}
 
-	scrcpy, err := a.scrcpyPath()
+	scrcpy, err := adb.ScrcpyPath()
 	if err != nil {
 		return err
 	}
 	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(a.ctx)
-	sessionSeq++
-	sessionID := fmt.Sprintf("%s#%d", serial, sessionSeq)
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.seq++
+	sessionID := fmt.Sprintf("%s#%d", serial, m.seq)
 	args := []string{"-s", serial}
-	settings, err := LoadSettings()
+	settings, err := settings.Load()
 	if err != nil {
 		cancel()
 		return fmt.Errorf("读取设置失败: %v", err)
@@ -199,26 +197,26 @@ func (a *App) startScrcpyOpts(serial string, extra []string, lockedPkg string, e
 	}
 
 	proc := &ScrcpyProcess{Serial: serial, SessionID: sessionID, StartedAt: time.Now(), LockedPkg: lockedPkg, cmd: cmd, cancel: cancel}
-	scrcpyProcs[sessionID] = proc
+	m.procs[sessionID] = proc
 
 	go func() {
 		_ = cmd.Wait()
 		deleted := false
-		screenMu.Lock()
-		if cur, ok := scrcpyProcs[sessionID]; ok && cur == proc {
-			delete(scrcpyProcs, sessionID)
+		m.screenMu.Lock()
+		if cur, ok := m.procs[sessionID]; ok && cur == proc {
+			delete(m.procs, sessionID)
 			deleted = true
 		}
-		screenMu.Unlock()
+		m.screenMu.Unlock()
 		if deleted {
-			runtime.EventsEmit(a.ctx, "screen:exited", sessionID)
+			m.emit("screen:exited", sessionID)
 		}
 	}()
 
 	return nil
 }
 
-func argsWindowTitle(s *ScrcpySettings) string {
+func argsWindowTitle(s *settings.ScrcpySettings) string {
 	if s.WindowTitle != nil && strings.TrimSpace(*s.WindowTitle) != "" {
 		return strings.TrimSpace(*s.WindowTitle)
 	}
@@ -242,52 +240,52 @@ func hasAnyArg(args []string, flags ...string) bool {
 }
 
 // CloseScreen 关闭指定会话的投屏（sessionID 形如 serial#n）
-func (a *App) CloseScreen(sessionID string) error {
-	screenMu.Lock()
-	defer screenMu.Unlock()
+func (m *Manager) CloseScreen(sessionID string) error {
+	m.screenMu.Lock()
+	defer m.screenMu.Unlock()
 
-	p, ok := scrcpyProcs[sessionID]
+	p, ok := m.procs[sessionID]
 	if !ok {
 		return fmt.Errorf("投屏 %s 没有在运行", sessionID)
 	}
 	p.cancel()
-	delete(scrcpyProcs, sessionID)
+	delete(m.procs, sessionID)
 	return nil
 }
 
 // ScreenStatus 返回各投屏会话运行状态（key: sessionID，形如 serial#n）
-func (a *App) ScreenStatus() map[string]bool {
-	screenMu.Lock()
-	defer screenMu.Unlock()
-	m := make(map[string]bool)
-	for s := range scrcpyProcs {
-		m[s] = true
+func (m *Manager) ScreenStatus() map[string]bool {
+	m.screenMu.Lock()
+	defer m.screenMu.Unlock()
+	status := make(map[string]bool)
+	for s := range m.procs {
+		status[s] = true
 	}
-	return m
+	return status
 }
 
 // ListApps 列出设备上已安装应用（scrcpy --list-apps）
-func (a *App) ListApps(serial string) ([]AndroidApp, error) {
-	scrcpy, err := a.scrcpyPath()
+func (m *Manager) ListApps(serial string) ([]AndroidApp, error) {
+	scrcpy, err := adb.ScrcpyPath()
 	if err != nil {
 		return nil, err
 	}
 	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return nil, err
 	}
 
 	// 列应用可能较慢，给更长超时
 	run := func() (string, error) {
-		ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+		ctx, cancel := context.WithTimeout(m.ctx, 60*time.Second)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, scrcpy, "--list-apps", "-s", serial).CombinedOutput()
 		return string(out), err
 	}
 	out, err := run()
-	if err != nil && isAdbDaemonError(out) {
-		invalidateAdbServer()
-		if err2 := a.ensureAdbServer(); err2 == nil {
+	if err != nil && adb.IsDaemonError(out) {
+		adb.InvalidateServer()
+		if err2 := adb.EnsureServer(); err2 == nil {
 			out, err = run()
 		}
 	}
@@ -323,13 +321,13 @@ func (a *App) ListApps(serial string) ([]AndroidApp, error) {
 
 // ListEncoders 列出设备可用的视频编码器（scrcpy --list-encoders）。
 // 传 codec 时先加 --video-codec 让 scrcpy 只列该编码对应的编码器。
-func (a *App) ListEncoders(serial string, codec string) ([]VideoEncoder, error) {
-	scrcpy, err := a.scrcpyPath()
+func (m *Manager) ListEncoders(serial string, codec string) ([]VideoEncoder, error) {
+	scrcpy, err := adb.ScrcpyPath()
 	if err != nil {
 		return nil, err
 	}
 	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return nil, err
 	}
 
@@ -339,15 +337,15 @@ func (a *App) ListEncoders(serial string, codec string) ([]VideoEncoder, error) 
 	}
 
 	run := func() (string, error) {
-		ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+		ctx, cancel := context.WithTimeout(m.ctx, 60*time.Second)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, scrcpy, args...).CombinedOutput()
 		return string(out), err
 	}
 	out, err := run()
-	if err != nil && isAdbDaemonError(out) {
-		invalidateAdbServer()
-		if err2 := a.ensureAdbServer(); err2 == nil {
+	if err != nil && adb.IsDaemonError(out) {
+		adb.InvalidateServer()
+		if err2 := adb.EnsureServer(); err2 == nil {
 			out, err = run()
 		}
 	}

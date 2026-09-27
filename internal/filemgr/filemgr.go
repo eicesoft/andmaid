@@ -1,4 +1,5 @@
-package main
+// Package filemgr 设备文件管理与 APK 安装（adb pull/push/shell 实现）。
+package filemgr
 
 import (
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"andmaid/internal/adb"
 )
 
 // 设备文件管理 + APK 安装：通过 adb 实现的轻量文件管理器后端。
@@ -39,8 +42,8 @@ type InstallProgress struct {
 }
 
 // listStorages 列出设备可写存储根目录
-func (a *App) ListStorages(serial string) ([]DeviceStorage, error) {
-	out, err := a.runAdb("-s", serial, "shell", "ls", "/storage")
+func (m *Manager) ListStorages(serial string) ([]DeviceStorage, error) {
+	out, err := adb.Exec("-s", serial, "shell", "ls", "/storage")
 	if err != nil {
 		// 老设备回退 sdcard 路径
 		return []DeviceStorage{{ID: "/sdcard", Description: "内部存储"}}, nil
@@ -70,7 +73,7 @@ func (a *App) ListStorages(serial string) ([]DeviceStorage, error) {
 }
 
 // ListFiles 列出设备目录内容（adb shell ls -l）
-func (a *App) ListFiles(serial string, path string) ([]FileEntry, error) {
+func (m *Manager) ListFiles(serial string, path string) ([]FileEntry, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "/storage/emulated/0"
@@ -83,7 +86,7 @@ func (a *App) ListFiles(serial string, path string) ([]FileEntry, error) {
 		return nil, fmt.Errorf("路径含非法字符")
 	}
 
-	out, err := a.runAdb("-s", serial, "shell", "ls", "-l", path)
+	out, err := adb.Exec("-s", serial, "shell", "ls", "-l", path)
 	if err != nil {
 		msg := strings.TrimSpace(out)
 		if msg == "" {
@@ -95,7 +98,7 @@ func (a *App) ListFiles(serial string, path string) ([]FileEntry, error) {
 		return nil, fmt.Errorf("读取目录失败: %s", msg)
 	}
 
-	entries := a.parseLsOutput(out, path)
+	entries := m.parseLsOutput(out, path)
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].IsDir != entries[j].IsDir {
 			return entries[i].IsDir
@@ -107,8 +110,9 @@ func (a *App) ListFiles(serial string, path string) ([]FileEntry, error) {
 
 // parseLsOutput 解析 `ls -l` 输出。toybox 与 busybox 行格式略有差异，取交集解析。
 // 典型行: -rw-rw---- 1 root sdcard_rw 12345 2024-01-02 15:04 file.txt
-//        drwxrwx--x 5 root sdcard_rw     4096 2024-01-02 15:04 Dir
-func (a *App) parseLsOutput(out string, basePath string) []FileEntry {
+//
+//	drwxrwx--x 5 root sdcard_rw     4096 2024-01-02 15:04 Dir
+func (m *Manager) parseLsOutput(out string, basePath string) []FileEntry {
 	var entries []FileEntry
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -177,11 +181,11 @@ func (a *App) parseLsOutput(out string, basePath string) []FileEntry {
 }
 
 // Mkdir 在设备上新建目录
-func (a *App) Mkdir(serial string, path string) error {
+func (m *Manager) Mkdir(serial string, path string) error {
 	if err := validateDevicePath(path); err != nil {
 		return err
 	}
-	out, err := a.runAdb("-s", serial, "shell", "mkdir", "-p", deviceShellQuote(path))
+	out, err := adb.Exec("-s", serial, "shell", "mkdir", "-p", deviceShellQuote(path))
 	if err != nil {
 		return fmt.Errorf("新建目录失败: %s", strings.TrimSpace(out))
 	}
@@ -190,11 +194,11 @@ func (a *App) Mkdir(serial string, path string) error {
 }
 
 // NewFile 在设备上新建空文件
-func (a *App) NewFile(serial string, path string) error {
+func (m *Manager) NewFile(serial string, path string) error {
 	if err := validateDevicePath(path); err != nil {
 		return err
 	}
-	out, err := a.runAdb("-s", serial, "shell", "touch", deviceShellQuote(path))
+	out, err := adb.Exec("-s", serial, "shell", "touch", deviceShellQuote(path))
 	if err != nil {
 		return fmt.Errorf("新建文件失败: %s", strings.TrimSpace(out))
 	}
@@ -202,7 +206,7 @@ func (a *App) NewFile(serial string, path string) error {
 }
 
 // DeleteFiles 删除设备上多个文件/目录（目录递归）
-func (a *App) DeleteFiles(serial string, paths []string) error {
+func (m *Manager) DeleteFiles(serial string, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
@@ -213,7 +217,7 @@ func (a *App) DeleteFiles(serial string, paths []string) error {
 		}
 		args = append(args, deviceShellQuote(p))
 	}
-	out, err := a.runAdb(args...)
+	out, err := adb.Exec(args...)
 	if err != nil {
 		return fmt.Errorf("删除失败: %s", strings.TrimSpace(out))
 	}
@@ -221,7 +225,7 @@ func (a *App) DeleteFiles(serial string, paths []string) error {
 }
 
 // RenameDeviceFile 设备端重命名（同一目录内改名）
-func (a *App) RenameDeviceFile(serial string, oldPath string, newName string) error {
+func (m *Manager) RenameDeviceFile(serial string, oldPath string, newName string) error {
 	if err := validateDevicePath(oldPath); err != nil {
 		return err
 	}
@@ -231,7 +235,7 @@ func (a *App) RenameDeviceFile(serial string, oldPath string, newName string) er
 	}
 	dir := deviceDir(oldPath)
 	newPath := dir + "/" + newName
-	out, err := a.runAdb("-s", serial, "shell", "mv", deviceShellQuote(oldPath), deviceShellQuote(newPath))
+	out, err := adb.Exec("-s", serial, "shell", "mv", deviceShellQuote(oldPath), deviceShellQuote(newPath))
 	if err != nil {
 		return fmt.Errorf("重命名失败: %s", strings.TrimSpace(out))
 	}
@@ -239,16 +243,16 @@ func (a *App) RenameDeviceFile(serial string, oldPath string, newName string) er
 }
 
 // CopyDeviceFiles 设备端复制多个文件/目录到目标目录（cp -r）
-func (a *App) CopyDeviceFiles(serial string, srcs []string, destDir string) error {
-	return a.deviceCpMv(serial, "cp -r", srcs, destDir)
+func (m *Manager) CopyDeviceFiles(serial string, srcs []string, destDir string) error {
+	return m.deviceCpMv(serial, "cp -r", srcs, destDir)
 }
 
 // MoveDeviceFiles 设备端移动（剪切）多个文件/目录到目标目录
-func (a *App) MoveDeviceFiles(serial string, srcs []string, destDir string) error {
-	return a.deviceCpMv(serial, "mv", srcs, destDir)
+func (m *Manager) MoveDeviceFiles(serial string, srcs []string, destDir string) error {
+	return m.deviceCpMv(serial, "mv", srcs, destDir)
 }
 
-func (a *App) deviceCpMv(serial string, verb string, srcs []string, destDir string) error {
+func (m *Manager) deviceCpMv(serial string, verb string, srcs []string, destDir string) error {
 	if len(srcs) == 0 {
 		return nil
 	}
@@ -265,7 +269,7 @@ func (a *App) deviceCpMv(serial string, verb string, srcs []string, destDir stri
 		args = append(args, deviceShellQuote(p))
 	}
 	args = append(args, deviceShellQuote(destDir))
-	out, err := a.runAdb(args...)
+	out, err := adb.Exec(args...)
 	if err != nil {
 		return fmt.Errorf("操作失败: %s", strings.TrimSpace(out))
 	}
@@ -273,11 +277,11 @@ func (a *App) deviceCpMv(serial string, verb string, srcs []string, destDir stri
 }
 
 // DownloadFile 从设备拉取文件到本机（adb pull），弹保存框选目标路径
-func (a *App) DownloadFile(serial string, devicePath string) (string, error) {
+func (m *Manager) DownloadFile(serial string, devicePath string) (string, error) {
 	if err := validateDevicePath(devicePath); err != nil {
 		return "", err
 	}
-	local, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	local, err := runtime.SaveFileDialog(m.ctx, runtime.SaveDialogOptions{
 		DefaultFilename: filepath.Base(devicePath),
 		Title:           "保存到本机",
 	})
@@ -287,7 +291,7 @@ func (a *App) DownloadFile(serial string, devicePath string) (string, error) {
 	if local == "" {
 		return "", nil // 用户取消
 	}
-	out, err := a.runAdb("-s", serial, "pull", devicePath, local)
+	out, err := adb.Exec("-s", serial, "pull", devicePath, local)
 	if err != nil {
 		return "", fmt.Errorf("下载失败: %s", strings.TrimSpace(out))
 	}
@@ -295,11 +299,11 @@ func (a *App) DownloadFile(serial string, devicePath string) (string, error) {
 }
 
 // UploadFiles 弹多选框选本机文件后上传到设备目录（adb push），带进度事件 upload:progress
-func (a *App) UploadFiles(serial string, deviceDir string) error {
+func (m *Manager) UploadFiles(serial string, deviceDir string) error {
 	if err := validateDevicePath(deviceDir); err != nil {
 		return err
 	}
-	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+	files, err := runtime.OpenMultipleFilesDialog(m.ctx, runtime.OpenDialogOptions{
 		Title: "选择要上传的文件",
 	})
 	if err != nil {
@@ -317,10 +321,10 @@ func (a *App) UploadFiles(serial string, deviceDir string) error {
 	}
 	var done int64
 	for _, f := range files {
-		out, err := a.runAdb("-s", serial, "push", f, deviceDir)
+		out, err := adb.Exec("-s", serial, "push", f, deviceDir)
 		done += fileSizeOrZero(f)
 		if total > 0 {
-			runtime.EventsEmit(a.ctx, "upload:progress", InstallProgress{
+			m.emit("upload:progress", InstallProgress{
 				Serial: serial, File: filepath.Base(f),
 				Percent: int(done * 100 / total), Stage: "uploading", Message: filepath.Base(f),
 			})
@@ -329,13 +333,13 @@ func (a *App) UploadFiles(serial string, deviceDir string) error {
 			return fmt.Errorf("上传 %s 失败: %s", filepath.Base(f), strings.TrimSpace(out))
 		}
 	}
-	runtime.EventsEmit(a.ctx, "upload:progress", InstallProgress{Serial: serial, Percent: 100, Stage: "done"})
+	m.emit("upload:progress", InstallProgress{Serial: serial, Percent: 100, Stage: "done"})
 	return nil
 }
 
 // InstallApk 安装本机 APK 到设备，带进度事件 install:progress。
 // adb install 本身不回报进度；先 push 到 /data/local/tmp 显示上传进度，再 pm install。
-func (a *App) InstallApk(serial string, apkPath string) error {
+func (m *Manager) InstallApk(serial string, apkPath string) error {
 	apkPath = strings.TrimSpace(apkPath)
 	if apkPath == "" {
 		return fmt.Errorf("未选择 APK 文件")
@@ -348,37 +352,37 @@ func (a *App) InstallApk(serial string, apkPath string) error {
 		return fmt.Errorf("请选择 .apk 文件")
 	}
 	emit := func(stage string, percent int, msg string) {
-		runtime.EventsEmit(a.ctx, "install:progress", InstallProgress{
+		m.emit("install:progress", InstallProgress{
 			Serial: serial, File: filepath.Base(apkPath), Percent: percent, Stage: stage, Message: msg,
 		})
 	}
 
 	tmp := "/data/local/tmp/andmaid_install.apk"
 	// 覆盖旧临时文件，避免残留大文件占满空间
-	_, _ = a.runAdb("-s", serial, "shell", "rm", "-f", tmp)
+	_, _ = adb.Exec("-s", serial, "shell", "rm", "-f", tmp)
 
 	emit("pushing", -1, "正在推送 APK…")
-	out, err := a.runAdb("-s", serial, "push", apkPath, tmp)
+	out, err := adb.Exec("-s", serial, "push", apkPath, tmp)
 	if err != nil {
 		emit("error", 0, strings.TrimSpace(out))
 		return fmt.Errorf("推送 APK 失败: %s", strings.TrimSpace(out))
 	}
 	emit("installing", -1, "正在安装…")
-	out, err = a.runAdb("-s", serial, "shell", "pm", "install", "-r", tmp)
+	out, err = adb.Exec("-s", serial, "shell", "pm", "install", "-r", tmp)
 	if err != nil {
 		msg := strings.TrimSpace(out)
 		emit("error", 0, msg)
-		_, _ = a.runAdb("-s", serial, "shell", "rm", "-f", tmp)
+		_, _ = adb.Exec("-s", serial, "shell", "rm", "-f", tmp)
 		return fmt.Errorf("安装失败: %s", firstLine(msg))
 	}
-	_, _ = a.runAdb("-s", serial, "shell", "rm", "-f", tmp)
+	_, _ = adb.Exec("-s", serial, "shell", "rm", "-f", tmp)
 	emit("done", 100, "安装成功")
 	return nil
 }
 
 // PickAndInstallApk 弹文件选择框选 APK 后安装
-func (a *App) PickAndInstallApk(serial string) error {
-	picked, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+func (m *Manager) PickAndInstallApk(serial string) error {
+	picked, err := runtime.OpenFileDialog(m.ctx, runtime.OpenDialogOptions{
 		Title: "选择 APK 文件",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "APK 安装包 (*.apk)", Pattern: "*.apk"},
@@ -390,16 +394,16 @@ func (a *App) PickAndInstallApk(serial string) error {
 	if picked == "" {
 		return nil
 	}
-	return a.InstallApk(serial, picked)
+	return m.InstallApk(serial, picked)
 }
 
 // UninstallApp 卸载设备应用
-func (a *App) UninstallApp(serial string, pkg string) error {
+func (m *Manager) UninstallApp(serial string, pkg string) error {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" || strings.ContainsAny(pkg, " \t\r\n") {
 		return fmt.Errorf("包名不合法")
 	}
-	out, err := a.runAdb("-s", serial, "shell", "pm", "uninstall", pkg)
+	out, err := adb.Exec("-s", serial, "shell", "pm", "uninstall", pkg)
 	if err != nil {
 		return fmt.Errorf("卸载失败: %s", firstLine(strings.TrimSpace(out)))
 	}

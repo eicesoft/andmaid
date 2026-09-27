@@ -2,13 +2,13 @@ import React from 'react'
 import { Button, Card, Message, Typography } from '@arco-design/web-react'
 import { IconRefresh } from '@arco-design/web-react/icon'
 import { AdbStatus, RestartAdbServer } from '../../wailsjs/go/main/App'
-import type { main } from '../../wailsjs/go/models'
+import type { adb as adbNS } from '../../wailsjs/go/models'
 import PageHeader from '../components/PageHeader'
 
 const { Text } = Typography
 
 const HomePage: React.FC = () => {
-  const [adb, setAdb] = React.useState<main.AdbStatus | null>(null)
+  const [adb, setAdb] = React.useState<adbNS.Status | null>(null)
   const [adbLoading, setAdbLoading] = React.useState(false)
   const [restarting, setRestarting] = React.useState(false)
 

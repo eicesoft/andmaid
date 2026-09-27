@@ -1,4 +1,6 @@
-package main
+// Package settings 管理应用持久化设置：scrcpy 命令行参数（settings.json）
+// 与 AI 服务参数（ai.json）。
+package settings
 
 import (
 	"encoding/json"
@@ -28,30 +30,30 @@ type ScrcpySettings struct {
 	WindowTitle        *string `json:"windowTitle"`        // --window-title
 
 	// 视频
-	VideoBitRate        *string `json:"videoBitRate"`        // -b, --video-bit-rate
-	MaxSize             *int    `json:"maxSize"`             // -m, --max-size
-	MaxFPS              *float64 `json:"maxFps"`             // --max-fps
-	VideoCodec          *string `json:"videoCodec"`          // --video-codec
-	VideoEncoder        *string `json:"videoEncoder"`        // --video-encoder
-	VideoCodecOptions   *string `json:"videoCodecOptions"`   // --video-codec-options
-	VideoBuffer         *int    `json:"videoBuffer"`         // --video-buffer
-	VideoSource         *string `json:"videoSource"`         // --video-source
-	DisplayID           *string `json:"displayId"`           // --display-id
-	NewDisplay          *string `json:"newDisplay"`          // --new-display
-	CaptureOrientation  *string `json:"captureOrientation"`  // --capture-orientation
-	DisplayOrientation  *string `json:"displayOrientation"`  // --display-orientation
-	Angle               *int    `json:"angle"`               // --angle
-	Crop                *string `json:"crop"`                // --crop
-	NoVideo             *bool   `json:"noVideo"`             // --no-video
-	NoVideoPlayback     *bool   `json:"noVideoPlayback"`     // --no-video-playback
-	NoWindow            *bool   `json:"noWindow"`            // --no-window
-	NoDownsizeOnError   *bool   `json:"noDownsizeOnError"`   // --no-downsize-on-error
-	NoMipmaps           *bool   `json:"noMipmaps"`           // --no-mipmaps
-	PrintFps            *bool   `json:"printFps"`            // --print-fps
-	RenderDriver        *string `json:"renderDriver"`        // --render-driver
-	DisplayImePolicy    *string `json:"displayImePolicy"`    // --display-ime-policy
-	NoVdDestroyContent  *bool   `json:"noVdDestroyContent"`  // --no-vd-destroy-content
-	NoVdSystemDecorations *bool `json:"noVdSystemDecorations"` // --no-vd-system-decorations
+	VideoBitRate          *string  `json:"videoBitRate"`          // -b, --video-bit-rate
+	MaxSize               *int     `json:"maxSize"`               // -m, --max-size
+	MaxFPS                *float64 `json:"maxFps"`                // --max-fps
+	VideoCodec            *string  `json:"videoCodec"`            // --video-codec
+	VideoEncoder          *string  `json:"videoEncoder"`          // --video-encoder
+	VideoCodecOptions     *string  `json:"videoCodecOptions"`     // --video-codec-options
+	VideoBuffer           *int     `json:"videoBuffer"`           // --video-buffer
+	VideoSource           *string  `json:"videoSource"`           // --video-source
+	DisplayID             *string  `json:"displayId"`             // --display-id
+	NewDisplay            *string  `json:"newDisplay"`            // --new-display
+	CaptureOrientation    *string  `json:"captureOrientation"`    // --capture-orientation
+	DisplayOrientation    *string  `json:"displayOrientation"`    // --display-orientation
+	Angle                 *int     `json:"angle"`                 // --angle
+	Crop                  *string  `json:"crop"`                  // --crop
+	NoVideo               *bool    `json:"noVideo"`               // --no-video
+	NoVideoPlayback       *bool    `json:"noVideoPlayback"`       // --no-video-playback
+	NoWindow              *bool    `json:"noWindow"`              // --no-window
+	NoDownsizeOnError     *bool    `json:"noDownsizeOnError"`     // --no-downsize-on-error
+	NoMipmaps             *bool    `json:"noMipmaps"`             // --no-mipmaps
+	PrintFps              *bool    `json:"printFps"`              // --print-fps
+	RenderDriver          *string  `json:"renderDriver"`          // --render-driver
+	DisplayImePolicy      *string  `json:"displayImePolicy"`      // --display-ime-policy
+	NoVdDestroyContent    *bool    `json:"noVdDestroyContent"`    // --no-vd-destroy-content
+	NoVdSystemDecorations *bool    `json:"noVdSystemDecorations"` // --no-vd-system-decorations
 
 	// 声音
 	NoAudio           *bool   `json:"noAudio"`           // --no-audio
@@ -110,27 +112,27 @@ type ScrcpySettings struct {
 }
 
 var (
-	settingsMu       sync.Mutex
-	settingsFilePath string
+	mu       sync.Mutex
+	filePath string
 )
 
-func settingsPath() string {
-	if settingsFilePath != "" {
-		return settingsFilePath
+func path() string {
+	if filePath != "" {
+		return filePath
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		dir = "."
 	}
 	p := filepath.Join(dir, "andmaid", "settings.json")
-	settingsFilePath = p
+	filePath = p
 	return p
 }
 
-// LoadSettings 读取设置，不存在时返回默认值（全空）。
-func LoadSettings() (*ScrcpySettings, error) {
+// Load 读取设置，不存在时返回默认值（全空）。
+func Load() (*ScrcpySettings, error) {
 	s := &ScrcpySettings{}
-	data, err := os.ReadFile(settingsPath())
+	data, err := os.ReadFile(path())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -143,19 +145,12 @@ func LoadSettings() (*ScrcpySettings, error) {
 	return s, nil
 }
 
-// GetSettings 供前端读取设置
-func (a *App) GetSettings() (*ScrcpySettings, error) {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	return LoadSettings()
-}
+// Save 原子写入设置
+func Save(s *ScrcpySettings) error {
+	mu.Lock()
+	defer mu.Unlock()
 
-// SaveSettings 供前端保存设置
-func (a *App) SaveSettings(s *ScrcpySettings) error {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-
-	p := settingsPath()
+	p := path()
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -170,11 +165,11 @@ func (a *App) SaveSettings(s *ScrcpySettings) error {
 	return os.Rename(tmp, p)
 }
 
-// ResetSettings 恢复默认（全空）设置
-func (a *App) ResetSettings() error {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	return os.Remove(settingsPath())
+// Reset 恢复默认（删除设置文件）
+func Reset() error {
+	mu.Lock()
+	defer mu.Unlock()
+	return os.Remove(path())
 }
 
 // QuoteArg Windows 命令行参数转义

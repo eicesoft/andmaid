@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package embed
 
 import (
 	"context"
@@ -20,32 +20,32 @@ import (
 
 // EmbedScreen 启动内嵌投屏（降级）：直接开 scrcpy 独立窗口，
 // 宿主窗口保持前端传入的尺寸，显示工具栏。
-func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolbarW int) error {
-	embedMu.Lock()
-	defer embedMu.Unlock()
+func (m *Manager) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolbarW int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if p, ok := embedProcs[serial]; ok {
+	if p, ok := m.procs[serial]; ok {
 		if p.cmd.ProcessState == nil {
 			return fmt.Errorf("设备 %s 内嵌投屏已在运行", serial)
 		}
-		delete(embedProcs, serial)
+		delete(m.procs, serial)
 	}
 
-	scrcpy, err := a.scrcpyPath()
+	scrcpy, err := adb.ScrcpyPath()
 	if err != nil {
 		return err
 	}
 	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return err
 	}
 
-	settings, err := LoadSettings()
+	scfg, err := settings.Load()
 	if err != nil {
 		return fmt.Errorf("读取设置失败: %v", err)
 	}
 
-	aspect, _ := a.deviceAspect(serial)
+	aspect, _ := m.deviceAspect(serial)
 	fw, fh := fitToArea(aspect, 480, 800)
 	if w > 0 && h > 0 {
 		fw, fh = fitToArea(aspect, w, h)
@@ -54,33 +54,33 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 		}
 	}
 
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel := context.WithCancel(m.ctx)
 	args := []string{
 		"-s", serial,
 		"--window-title", "Andmaid 投屏 - " + serial,
 		"--window-width", fmt.Sprint(fw),
 		"--window-height", fmt.Sprint(fh),
 	}
-	args = append(args, settings.BuildArgs(true)...)
+	args = append(args, scfg.BuildArgs(true)...)
 	cmd := exec.CommandContext(ctx, scrcpy, args...)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return fmt.Errorf("scrcpy 启动失败: %v", err)
 	}
 
-	embedProcs[serial] = &EmbedProcess{Serial: serial, StartedAt: time.Now(), cmd: cmd, cancel: cancel, aspect: aspect, toolbarW: toolbarW}
+	m.procs[serial] = &EmbedProcess{Serial: serial, StartedAt: time.Now(), cmd: cmd, cancel: cancel, aspect: aspect, toolbarW: toolbarW}
 
 	go func() {
 		_ = cmd.Wait()
 		deleted := false
-		embedMu.Lock()
-		if cur, ok := embedProcs[serial]; ok && cur.cmd == cmd {
-			delete(embedProcs, serial)
+		m.mu.Lock()
+		if cur, ok := m.procs[serial]; ok && cur.cmd == cmd {
+			delete(m.procs, serial)
 			deleted = true
 		}
-		embedMu.Unlock()
+		m.mu.Unlock()
 		if deleted {
-			wruntime.EventsEmit(a.ctx, "embed:exited", serial)
+			m.emit("embed:exited", serial)
 		}
 	}()
 
@@ -88,10 +88,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 }
 
 // ResizeEmbed 非 Windows 无子窗口可同步，工具栏窗口布局由前端自管，空实现。
-func (a *App) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
-	embedMu.Lock()
-	_, ok := embedProcs[serial]
-	embedMu.Unlock()
+func (m *Manager) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
+	m.mu.Lock()
+	_, ok := m.procs[serial]
+	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
 	}
@@ -99,10 +99,10 @@ func (a *App) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
 }
 
 // EmbedFlashBehind 非 Windows 投屏是独立窗口，HTML 弹层不会被遮挡，空实现。
-func (a *App) EmbedFlashBehind(serial string) error {
-	embedMu.Lock()
-	_, ok := embedProcs[serial]
-	embedMu.Unlock()
+func (m *Manager) EmbedFlashBehind(serial string) error {
+	m.mu.Lock()
+	_, ok := m.procs[serial]
+	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
 	}
@@ -110,31 +110,31 @@ func (a *App) EmbedFlashBehind(serial string) error {
 }
 
 // EmbedFlashRestore 非 Windows 空实现。
-func (a *App) EmbedFlashRestore(serial string) error {
+func (m *Manager) EmbedFlashRestore(serial string) error {
 	return nil
 }
 
 // CloseEmbed 关闭内嵌投屏
-func (a *App) CloseEmbed(serial string) error {
-	embedMu.Lock()
-	defer embedMu.Unlock()
+func (m *Manager) CloseEmbed(serial string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	p, ok := embedProcs[serial]
+	p, ok := m.procs[serial]
 	if !ok {
 		return fmt.Errorf("设备 %s 没有运行中的内嵌投屏", serial)
 	}
 	p.cancel()
-	delete(embedProcs, serial)
+	delete(m.procs, serial)
 	return nil
 }
 
 // EmbedStatus 返回内嵌投屏运行状态。
 // 非 Windows 没有跨进程互斥体，只报本进程会话（工具栏窗口各自独立）。
-func (a *App) EmbedStatus() map[string]bool {
-	embedMu.Lock()
-	defer embedMu.Unlock()
+func (m *Manager) EmbedStatus() map[string]bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m := make(map[string]bool)
-	for s := range embedProcs {
+	for s := range m.procs {
 		m[s] = true
 	}
 	return m

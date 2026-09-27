@@ -1,4 +1,4 @@
-module Andmaid
+module andmaid
 
 go 1.27.0
 

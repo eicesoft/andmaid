@@ -3,7 +3,7 @@ import { Button, Card, Input, Message, Select, Spin, Tag, Typography } from '@ar
 import { IconSend, IconLoading, IconTool } from '@arco-design/web-react/icon'
 import { EventsOn } from '../../wailsjs/runtime'
 import { AgentChat, ListDevices } from '../../wailsjs/go/main/App'
-import { main } from '../../wailsjs/go/models'
+import { agent } from '../../wailsjs/go/models'
 import PageHeader from '../components/PageHeader'
 
 const { Text } = Typography
@@ -129,7 +129,7 @@ const AgentPage: React.FC = () => {
     setBusy(true)
     try {
       const finalText = await AgentChat(
-        main.AgentChatRequest.createFrom({
+        agent.AgentChatRequest.createFrom({
           serial,
           messages: history.map((m) => ({ role: m.role, content: m.content })),
         }),

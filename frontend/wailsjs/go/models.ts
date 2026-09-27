@@ -1,33 +1,13 @@
-export namespace main {
+export namespace adb {
 	
-	export class AISettings {
-	    baseUrl: string;
-	    apiKey: string;
-	    model: string;
-	    temperature?: number;
-	    systemPrompt: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AISettings(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.baseUrl = source["baseUrl"];
-	        this.apiKey = source["apiKey"];
-	        this.model = source["model"];
-	        this.temperature = source["temperature"];
-	        this.systemPrompt = source["systemPrompt"];
-	    }
-	}
-	export class AdbStatus {
+	export class Status {
 	    running: boolean;
 	    version: string;
 	    devices: number;
 	    error?: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new AdbStatus(source);
+	        return new Status(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -38,6 +18,11 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+
+}
+
+export namespace agent {
+	
 	export class AgentMessage {
 	    role: string;
 	    content: string;
@@ -84,6 +69,10 @@ export namespace main {
 		    return a;
 		}
 	}
+
+}
+
+export namespace device {
 	
 	export class AndroidApp {
 	    name: string;
@@ -117,6 +106,29 @@ export namespace main {
 	        this.model = source["model"];
 	    }
 	}
+	export class VideoEncoder {
+	    codec: string;
+	    name: string;
+	    hardware: boolean;
+	    alias: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new VideoEncoder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.codec = source["codec"];
+	        this.name = source["name"];
+	        this.hardware = source["hardware"];
+	        this.alias = source["alias"];
+	    }
+	}
+
+}
+
+export namespace filemgr {
+	
 	export class DeviceStorage {
 	    id: string;
 	    description: string;
@@ -169,6 +181,31 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace settings {
+	
+	export class AISettings {
+	    baseUrl: string;
+	    apiKey: string;
+	    model: string;
+	    temperature?: number;
+	    systemPrompt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AISettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
+	        this.temperature = source["temperature"];
+	        this.systemPrompt = source["systemPrompt"];
+	    }
 	}
 	export class ScrcpySettings {
 	    fullscreen?: boolean;
@@ -340,24 +377,6 @@ export namespace main {
 	        this.pauseOnExit = source["pauseOnExit"];
 	        this.startApp = source["startApp"];
 	        this.timeLimit = source["timeLimit"];
-	    }
-	}
-	export class VideoEncoder {
-	    codec: string;
-	    name: string;
-	    hardware: boolean;
-	    alias: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new VideoEncoder(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.codec = source["codec"];
-	        this.name = source["name"];
-	        this.hardware = source["hardware"];
-	        this.alias = source["alias"];
 	    }
 	}
 

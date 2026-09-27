@@ -1,4 +1,6 @@
-package main
+// Agent：OpenAI 兼容 chat completions，流式输出 + function tool call。
+// 前端经 Wails 绑定 AgentChat 调用，流式事件走 runtime.EventsEmit。
+package agent
 
 import (
 	"bufio"
@@ -11,26 +13,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"andmaid/internal/settings"
 )
-
-// Agent：OpenAI 兼容 chat completions，流式输出 + function tool call。
-// 前端经 Wails 绑定 AgentChat 调用，流式事件走 runtime.EventsEmit。
 
 // ---------- 请求/响应结构 ----------
 
 type ChatMessage struct {
-	Role       string      `json:"role"`
-	Content    string      `json:"content"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 type ToolCall struct {
-	Index    *int              `json:"index,omitempty"` // 流式增量必带
-	ID       string            `json:"id,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Function ToolCallFunction  `json:"function"`
+	Index    *int             `json:"index,omitempty"` // 流式增量必带
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function ToolCallFunction `json:"function"`
 }
 
 type ToolCallFunction struct {
@@ -47,8 +46,8 @@ type chatRequest struct {
 }
 
 type AgentTool struct {
-	Type     string             `json:"type"`
-	Function AgentToolFunction  `json:"function"`
+	Type     string            `json:"type"`
+	Function AgentToolFunction `json:"function"`
 }
 
 type AgentToolFunction struct {
@@ -132,7 +131,7 @@ func agentTools() []AgentTool {
 				Name:        "open_app_screen",
 				Description: "开启投屏并直接启动设备上指定应用（虚拟显示器多开）",
 				Parameters: obj(map[string]interface{}{
-					"serial": map[string]interface{}{"type": "string", "description": "设备序列号；留空用第一台在线设备"},
+					"serial":  map[string]interface{}{"type": "string", "description": "设备序列号；留空用第一台在线设备"},
 					"package": map[string]interface{}{"type": "string", "description": "应用包名，如 com.example.app"},
 				}, "package"),
 			},
@@ -243,10 +242,6 @@ type agentEvent struct {
 	Error     string     `json:"error,omitempty"`
 }
 
-func (a *App) emitAgentEvent(ev agentEvent) {
-	runtime.EventsEmit(a.ctx, agentEventName, ev)
-}
-
 // ---------- 主流程 ----------
 
 const agentEventName = "agent:event"
@@ -254,8 +249,8 @@ const maxToolRounds = 20 // 防死循环；复杂多步操作（开应用+点按
 
 // AgentChat 发起一轮 Agent 对话（流式，事件推前端）。
 // 返回最终 assistant 文本；工具调用过程通过 agent:event 事件实时推送。
-func (a *App) AgentChat(req AgentChatRequest) (string, error) {
-	s, err := LoadAISettings()
+func (ag *Service) AgentChat(req AgentChatRequest) (string, error) {
+	s, err := settings.LoadAI()
 	if err != nil {
 		return "", fmt.Errorf("读取 AI 设置失败: %v", err)
 	}
@@ -266,7 +261,7 @@ func (a *App) AgentChat(req AgentChatRequest) (string, error) {
 		return "", fmt.Errorf("未配置模型名，请先在设置中填写")
 	}
 
-	messages, err := a.buildAgentMessages(req)
+	messages, err := ag.buildAgentMessages(req)
 	if err != nil {
 		return "", err
 	}
@@ -276,9 +271,9 @@ func (a *App) AgentChat(req AgentChatRequest) (string, error) {
 	var finalText strings.Builder
 	reachedLimit := false
 	for round := 0; round < maxToolRounds; round++ {
-		respText, calls, err := a.agentStreamOnce(client, s, messages, tools)
+		respText, calls, err := ag.agentStreamOnce(client, s, messages, tools)
 		if err != nil {
-			a.emitAgentEvent(agentEvent{Type: "error", Error: err.Error()})
+			ag.emitAgentEvent(agentEvent{Type: "error", Error: err.Error()})
 			return finalText.String(), err
 		}
 		if len(calls) == 0 {
@@ -293,31 +288,31 @@ func (a *App) AgentChat(req AgentChatRequest) (string, error) {
 		// assistant 消息（含 tool_calls）入历史，再执行工具
 		assistantMsg := ChatMessage{Role: "assistant", Content: respText, ToolCalls: calls}
 		messages = append(messages, assistantMsg)
-		a.emitAgentEvent(agentEvent{Type: "tool_call", ToolCalls: calls})
+		ag.emitAgentEvent(agentEvent{Type: "tool_call", ToolCalls: calls})
 
 		for _, c := range calls {
-			result := a.execAgentTool(req.Serial, c.Function.Name, c.Function.Arguments)
+			result := ag.execAgentTool(req.Serial, c.Function.Name, c.Function.Arguments)
 			messages = append(messages, ChatMessage{Role: "tool", ToolCallID: c.ID, Content: result})
-			a.emitAgentEvent(agentEvent{Type: "tool_result", Content: fmt.Sprintf("%s: %s", c.Function.Name, result)})
+			ag.emitAgentEvent(agentEvent{Type: "tool_result", Content: fmt.Sprintf("%s: %s", c.Function.Name, result)})
 		}
 		finalText.WriteString(respText)
 	}
 	if reachedLimit {
 		finalText.WriteString("\n\n[已达单轮工具调用上限，任务未完成。请拆分成小步骤继续]")
 	}
-	a.emitAgentEvent(agentEvent{Type: "done"})
+	ag.emitAgentEvent(agentEvent{Type: "done"})
 	return finalText.String(), nil
 }
 
 // buildAgentMessages 组装系统提示（设备信息带入）+ 历史消息
-func (a *App) buildAgentMessages(req AgentChatRequest) ([]ChatMessage, error) {
-	devInfo := a.agentDeviceContext(req.Serial)
+func (ag *Service) buildAgentMessages(req AgentChatRequest) ([]ChatMessage, error) {
+	devInfo := ag.agentDeviceContext(req.Serial)
 	sys := "你是 Andmaid 桌面应用的设备助手，通过工具管理安卓设备与 scrcpy 投屏，并能代替用户操作设备。" +
 		"回答用中文，简洁准确。涉及设备操作时先调用工具获取真实信息，不要凭空猜测设备状态。\n" +
 		"操作屏幕的流程：先 ui_dump 获取当前屏幕元素及坐标，再用 tap/swipe/input_text/key_event 操作。" +
 		"点击后若需确认结果，再次 ui_dump 检查页面变化。\n" +
 		"当前设备环境：\n" + devInfo
-	if s, err := LoadAISettings(); err == nil && strings.TrimSpace(s.SystemPrompt) != "" {
+	if s, err := settings.LoadAI(); err == nil && strings.TrimSpace(s.SystemPrompt) != "" {
 		sys += "\n用户附加指令：" + strings.TrimSpace(s.SystemPrompt)
 	}
 
@@ -337,14 +332,14 @@ func (a *App) buildAgentMessages(req AgentChatRequest) ([]ChatMessage, error) {
 
 // agentStreamOnce 调一次 chat completions（流式），聚合文本与 tool call 增量。
 // 有 tool call 时文本可能为空，工具执行后进入下一轮。
-func (a *App) agentStreamOnce(client *http.Client, s *AISettings, messages []ChatMessage, tools []AgentTool) (string, []ToolCall, error) {
+func (ag *Service) agentStreamOnce(client *http.Client, s *settings.AISettings, messages []ChatMessage, tools []AgentTool) (string, []ToolCall, error) {
 	body, err := json.Marshal(chatRequest{
 		Model: strings.TrimSpace(s.Model), Messages: messages, Tools: tools, Stream: true, Temperature: s.Temperature,
 	})
 	if err != nil {
 		return "", nil, err
 	}
-	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ag.ctx, 5*time.Minute)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.BaseURLNorm()+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
@@ -401,7 +396,7 @@ func (a *App) agentStreamOnce(client *http.Client, s *AISettings, messages []Cha
 		delta := chunk.Choices[0].Delta
 		if delta.Content != "" {
 			text.WriteString(delta.Content)
-			a.emitAgentEvent(agentEvent{Type: "delta", Content: delta.Content})
+			ag.emitAgentEvent(agentEvent{Type: "delta", Content: delta.Content})
 		}
 		for _, tc := range delta.ToolCalls {
 			idx := 0

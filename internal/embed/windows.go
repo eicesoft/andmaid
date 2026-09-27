@@ -1,8 +1,11 @@
 //go:build windows
 
-package main
+package embed
 
 import (
+	"andmaid/internal/adb"
+	"andmaid/internal/settings"
+
 	"context"
 	"fmt"
 	"os"
@@ -13,7 +16,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/sys/windows"
 )
 
@@ -54,14 +56,14 @@ func (p *winEmbedProcess) hostArea() (int, int, int, int) {
 }
 
 // applyFit 按设备纵横比把子窗口适配到画面区居中
-func (a *App) applyFit(p *winEmbedProcess) {
+func (m *Manager) applyFit(p *winEmbedProcess) {
 	x, y, w, h := p.hostArea()
 	if w <= 0 || h <= 0 {
 		return
 	}
 	aspect := p.aspect
 	if aspect == 0 {
-		if a2, err := a.deviceAspect(p.Serial); err == nil {
+		if a2, err := m.deviceAspect(p.Serial); err == nil {
 			aspect = a2
 			p.aspect = a2
 		}
@@ -82,7 +84,7 @@ func (a *App) applyFit(p *winEmbedProcess) {
 	var rc _RECT
 	procGetClientRect.Call(p.childHwnd, uintptr(unsafe.Pointer(&rc)))
 	vis, _, _ := procIsWindowVisible.Call(p.childHwnd)
-	embedLog("applyFit want=%dx%d client=%dx%d pos=(%d,%d) vis=%d", fw, fh, int(rc.Right-rc.Left), int(rc.Bottom-rc.Top), fx, fy, vis)
+	log("applyFit want=%dx%d client=%dx%d pos=(%d,%d) vis=%d", fw, fh, int(rc.Right-rc.Left), int(rc.Bottom-rc.Top), fx, fy, vis)
 }
 
 // ===== Win32 API =====
@@ -103,54 +105,54 @@ type _MARGINS struct {
 }
 
 var (
-	user32                        = windows.NewLazySystemDLL("user32.dll")
-	procFindWindow                = user32.NewProc("FindWindowW")
-	procSetParent                 = user32.NewProc("SetParent")
-	procGetWindowLong             = user32.NewProc("GetWindowLongPtrW")
-	procSetWindowLong             = user32.NewProc("SetWindowLongPtrW")
-	procMoveWindow                = user32.NewProc("MoveWindow")
-	procSetWindowPos              = user32.NewProc("SetWindowPos")
-	procSendMessage               = user32.NewProc("SendMessageW")
-	procGetClientRect             = user32.NewProc("GetClientRect")
-	procGetWindowRect             = user32.NewProc("GetWindowRect")
-	procGetParent                 = user32.NewProc("GetParent")
-	procIsWindow                  = user32.NewProc("IsWindow")
-	procIsWindowVisible           = user32.NewProc("IsWindowVisible")
-	procBringWindowToTop          = user32.NewProc("BringWindowToTop")
-	procGetDpiForWindow           = user32.NewProc("GetDpiForWindow")
-	procSetThreadDpiAwareness     = user32.NewProc("SetThreadDpiAwarenessContext")
-	procGetWindowThreadProcessId  = user32.NewProc("GetWindowThreadProcessId")
-	procMonitorFromWindow         = user32.NewProc("MonitorFromWindow")
-	procGetMonitorInfo            = user32.NewProc("GetMonitorInfoW")
-	procSetWindowPos2             = user32.NewProc("SetWindowPos")
-	dwmapi                        = windows.NewLazySystemDLL("dwmapi.dll")
-	procDwmExtendFrame            = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
-	kernel32                      = windows.NewLazySystemDLL("kernel32.dll")
-	procCreateMutex               = kernel32.NewProc("CreateMutexW")
-	procOpenMutex                 = kernel32.NewProc("OpenMutexW")
-	procReleaseMutex              = kernel32.NewProc("ReleaseMutex")
-	procCloseHandle               = kernel32.NewProc("CloseHandle")
+	user32                       = windows.NewLazySystemDLL("user32.dll")
+	procFindWindow               = user32.NewProc("FindWindowW")
+	procSetParent                = user32.NewProc("SetParent")
+	procGetWindowLong            = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLong            = user32.NewProc("SetWindowLongPtrW")
+	procMoveWindow               = user32.NewProc("MoveWindow")
+	procSetWindowPos             = user32.NewProc("SetWindowPos")
+	procSendMessage              = user32.NewProc("SendMessageW")
+	procGetClientRect            = user32.NewProc("GetClientRect")
+	procGetWindowRect            = user32.NewProc("GetWindowRect")
+	procGetParent                = user32.NewProc("GetParent")
+	procIsWindow                 = user32.NewProc("IsWindow")
+	procIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	procBringWindowToTop         = user32.NewProc("BringWindowToTop")
+	procGetDpiForWindow          = user32.NewProc("GetDpiForWindow")
+	procSetThreadDpiAwareness    = user32.NewProc("SetThreadDpiAwarenessContext")
+	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
+	procMonitorFromWindow        = user32.NewProc("MonitorFromWindow")
+	procGetMonitorInfo           = user32.NewProc("GetMonitorInfoW")
+	procSetWindowPos2            = user32.NewProc("SetWindowPos")
+	dwmapi                       = windows.NewLazySystemDLL("dwmapi.dll")
+	procDwmExtendFrame           = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	kernel32                     = windows.NewLazySystemDLL("kernel32.dll")
+	procCreateMutex              = kernel32.NewProc("CreateMutexW")
+	procOpenMutex                = kernel32.NewProc("OpenMutexW")
+	procReleaseMutex             = kernel32.NewProc("ReleaseMutex")
+	procCloseHandle              = kernel32.NewProc("CloseHandle")
 )
 
 const (
-	wsChild      = 0x40000000
-	wsPopup      = 0x80000000
-	wsCaption    = 0x00C00000
-	wsThickfr    = 0x00040000
-	wsMinimize   = 0x00020000
-	wsMaximize   = 0x01000000
-	wsMaxBox     = 0x00010000
-	wsSysMenu    = 0x00080000
-	wsDlgFrame   = 0x00400000
-	wsBorder     = 0x00800000
-	wsClipSibs   = 0x04000000
-	gwlStyle     = ^uintptr(16) // GWL_STYLE = -16
-	swpNoSize    = 0x0001
-	swpNoMove    = 0x0002
-	swpNoZOrder  = 0x0004
-	swpNoAct     = 0x0010
-	swpFrameChg  = 0x0020
-	swpShowWin   = 0x0040
+	wsChild     = 0x40000000
+	wsPopup     = 0x80000000
+	wsCaption   = 0x00C00000
+	wsThickfr   = 0x00040000
+	wsMinimize  = 0x00020000
+	wsMaximize  = 0x01000000
+	wsMaxBox    = 0x00010000
+	wsSysMenu   = 0x00080000
+	wsDlgFrame  = 0x00400000
+	wsBorder    = 0x00800000
+	wsClipSibs  = 0x04000000
+	gwlStyle    = ^uintptr(16) // GWL_STYLE = -16
+	swpNoSize   = 0x0001
+	swpNoMove   = 0x0002
+	swpNoZOrder = 0x0004
+	swpNoAct    = 0x0010
+	swpFrameChg = 0x0020
+	swpShowWin  = 0x0040
 )
 
 func toUTF16Ptr(s string) uintptr {
@@ -252,15 +254,15 @@ func monitorWorkArea(hwnd uintptr) (_RECT, bool) {
 
 // EmbedScreen 启动内嵌投屏：新开一个 Andmaid 窗口（独立进程），把无边框 scrcpy 窗口 SetParent 嵌进去。
 // hostTitle 用于定位新开的宿主窗口，toolbarW 为前端工具栏宽度（CSS px）。由前端先开新窗口再调用。
-func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolbarW int) error {
-	embedMu.Lock()
-	defer embedMu.Unlock()
+func (m *Manager) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolbarW int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if p, ok := embedProcs[serial]; ok {
+	if p, ok := m.procs[serial]; ok {
 		if p.cmd.ProcessState == nil {
 			return fmt.Errorf("设备 %s 内嵌投屏已在运行", serial)
 		}
-		delete(embedProcs, serial)
+		delete(m.procs, serial)
 	}
 	if embedMutexExists(serial) {
 		return fmt.Errorf("设备 %s 内嵌投屏已在其他窗口运行", serial)
@@ -268,7 +270,7 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 
 	// 宿主窗口必须存在且属于本进程
 	hostHwnd := findSelfWindow(hostTitle)
-	embedLog("EmbedScreen serial=%s host=0x%x area=(%d,%d,%d,%d) toolbar=%d", serial, hostHwnd, x, y, w, h, toolbarW)
+	log("EmbedScreen serial=%s host=0x%x area=(%d,%d,%d,%d) toolbar=%d", serial, hostHwnd, x, y, w, h, toolbarW)
 	if hostHwnd == 0 {
 		return fmt.Errorf("未找到宿主窗口 %s", hostTitle)
 	}
@@ -277,24 +279,24 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 		return fmt.Errorf("窗口 %s 不属于本进程", hostTitle)
 	}
 
-	scrcpy, err := a.scrcpyPath()
+	scrcpy, err := adb.ScrcpyPath()
 	if err != nil {
 		return err
 	}
 	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
-	if err := a.ensureAdbServer(); err != nil {
+	if err := adb.EnsureServer(); err != nil {
 		return err
 	}
 
 	// 宿主窗口客户区（子画面区去掉右侧 icon 栏宽度，前端把画面区算好传入）
-	settings, err := LoadSettings()
+	scfg, err := settings.Load()
 	if err != nil {
 		return fmt.Errorf("读取设置失败: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel := context.WithCancel(m.ctx)
 	// 初始尺寸：按设备纵横比算内容尺寸，把宿主窗口调成“内容+工具栏”，画面区恰好等于投屏，避免黑边
-	aspect, _ := a.deviceAspect(serial)
+	aspect, _ := m.deviceAspect(serial)
 	fw, fh := fitToArea(aspect, w, h)
 	// 初始内容放大 30%（宿主窗口随内容走，只受屏幕工作区约束）
 	fw = int(float64(fw) * 1.3)
@@ -324,10 +326,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 	procSetWindowLong.Call(hostHwnd, gwlStyle, style|wsThickfr|wsSysMenu)
 	// SWP_FRAMECHANGED 让新样式立即生效
 	procSetWindowPos2.Call(hostHwnd, 0, 0, 0, 0, 0, swpNoSize|swpNoMove|swpNoZOrder|swpFrameChg|swpNoAct)
-	var m _MARGINS
-	m.cxLeftWidth, m.cxRightWidth, m.cyTopHeight, m.cyBottomHeight = 1, 1, 1, 1
-	procDwmExtendFrame.Call(hostHwnd, uintptr(unsafe.Pointer(&m)))
-	embedLog("初始尺寸 host=%dx%d content=%dx%d dpr=%.2f", hostW, fh, fw, fh, dpr)
+	var margins _MARGINS
+	margins.cxLeftWidth, margins.cxRightWidth, margins.cyTopHeight, margins.cyBottomHeight = 1, 1, 1, 1
+	procDwmExtendFrame.Call(hostHwnd, uintptr(unsafe.Pointer(&margins)))
+	log("初始尺寸 host=%dx%d content=%dx%d dpr=%.2f", hostW, fh, fw, fh, dpr)
 	fx := x
 	fy := y
 	// 不要加 --window-borderless：borderless 会把 SDL 客户区/画面锁死在启动尺寸，
@@ -340,7 +342,7 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 		"--window-width", fmt.Sprint(fw),
 		"--window-height", fmt.Sprint(fh),
 	}
-	args = append(args, settings.BuildArgs(true)...)
+	args = append(args, scfg.BuildArgs(true)...)
 	cmd := exec.CommandContext(ctx, scrcpy, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
@@ -349,7 +351,7 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 	}
 
 	proc := &winEmbedProcess{EmbedProcess: EmbedProcess{Serial: serial, StartedAt: time.Now(), cmd: cmd, cancel: cancel, aspect: aspect, toolbarW: toolbarW}, hostHwnd: hostHwnd}
-	embedProcs[serial] = &proc.EmbedProcess
+	m.procs[serial] = &proc.EmbedProcess
 	winProcs[serial] = proc
 	if mh := holdEmbedMutex(serial); mh != 0 {
 		proc.mutex = mh
@@ -366,10 +368,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 				if h == childHwnd {
 					// 同一句柄连续两次轮询仍在 → 窗口稳定，开始嵌入
 					if err := embedWindowTo(h, hostHwnd); err != nil {
-						embedLog("嵌入失败 0x%x: %v", h, err)
+						log("嵌入失败 0x%x: %v", h, err)
 						return
 					}
-					embedLog("嵌入成功 0x%x host=0x%x", h, hostHwnd)
+					log("嵌入成功 0x%x host=0x%x", h, hostHwnd)
 					proc.embedded = true
 					proc.childHwnd = h
 					// 会话级监督：SDL 销毁重建窗口、脱离宿主、宿主尺寸变化时自动修正。
@@ -416,10 +418,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 						// 宿主客户区变化：后端直接适配（webview resize 事件可能不触发）
 						_, _, cw, ch := proc.hostArea()
 						if cw > 0 && (cw != lastW || ch != lastH) {
-							embedLog("客户区变化 %dx%d → %dx%d，重新适配", lastW, lastH, cw, ch)
+							log("客户区变化 %dx%d → %dx%d，重新适配", lastW, lastH, cw, ch)
 							lastW, lastH = cw, ch
-							a.applyFit(proc)
-							embedLog("适配完成 childRect 已更新")
+							m.applyFit(proc)
+							log("适配完成 childRect 已更新")
 						}
 					}
 				}
@@ -432,9 +434,9 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 	go func() {
 		_ = cmd.Wait()
 		deleted := false
-		embedMu.Lock()
-		if cur, ok := embedProcs[serial]; ok && cur == &proc.EmbedProcess {
-			delete(embedProcs, serial)
+		m.mu.Lock()
+		if cur, ok := m.procs[serial]; ok && cur == &proc.EmbedProcess {
+			delete(m.procs, serial)
 			delete(winProcs, serial)
 			deleted = true
 			if proc.mutex != 0 {
@@ -443,9 +445,9 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 				proc.mutex = 0
 			}
 		}
-		embedMu.Unlock()
+		m.mu.Unlock()
 		if deleted {
-			runtime.EventsEmit(a.ctx, "embed:exited", serial)
+			m.emit("embed:exited", serial)
 		}
 	}()
 
@@ -501,7 +503,7 @@ func (p *winEmbedProcess) setChildBehind(behind bool) {
 
 // ensureChild 确保子窗口句柄可用：失效时按标题重找并重挂（自愈）。
 // 返回可用句柄，失败返回 0。
-func (a *App) ensureChild(p *winEmbedProcess) uintptr {
+func (m *Manager) ensureChild(p *winEmbedProcess) uintptr {
 	isw, _, _ := procIsWindow.Call(p.childHwnd)
 	if isw != 0 {
 		pp, _, _ := procGetParent.Call(p.childHwnd)
@@ -536,12 +538,12 @@ func (a *App) ensureChild(p *winEmbedProcess) uintptr {
 
 // EmbedFlashBehind 截图提示用：把投屏子窗口压到 WebView 之下，让 HTML Message 可见。
 // 前端 setTimeout 后调用 EmbedFlashRestore 恢复。
-func (a *App) EmbedFlashBehind(serial string) error {
+func (m *Manager) EmbedFlashBehind(serial string) error {
 	proc, ok := winProcs[serial]
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
 	}
-	if a.ensureChild(proc) == 0 {
+	if m.ensureChild(proc) == 0 {
 		return fmt.Errorf("投屏窗口不可用")
 	}
 	proc.setChildBehind(true)
@@ -549,7 +551,7 @@ func (a *App) EmbedFlashBehind(serial string) error {
 }
 
 // EmbedFlashRestore 恢复投屏子窗口到 WebView 之上
-func (a *App) EmbedFlashRestore(serial string) error {
+func (m *Manager) EmbedFlashRestore(serial string) error {
 	proc, ok := winProcs[serial]
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
@@ -562,30 +564,30 @@ func (a *App) EmbedFlashRestore(serial string) error {
 // x/y/w/h 为前端画面区相对宿主客户区的位置和尺寸（物理像素）；
 // toolbarW 为前端工具栏宽度（CSS px），供后端自算画面区用。
 // 注意：嵌入后的子窗口 FindWindowW 搜不到（只搜顶层），必须用保存的句柄。
-func (a *App) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
-	embedMu.Lock()
+func (m *Manager) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
+	m.mu.Lock()
 	proc, ok := winProcs[serial]
-	embedMu.Unlock()
+	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
 	}
 	if toolbarW > 0 {
 		proc.toolbarW = toolbarW
 	}
-	child := a.ensureChild(proc)
+	child := m.ensureChild(proc)
 	if child == 0 {
 		return fmt.Errorf("投屏窗口不可用")
 	}
-	a.applyFit(proc)
+	m.applyFit(proc)
 	return nil
 }
 
 // CloseEmbed 关闭内嵌投屏
-func (a *App) CloseEmbed(serial string) error {
-	embedMu.Lock()
-	defer embedMu.Unlock()
+func (m *Manager) CloseEmbed(serial string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	p, ok := embedProcs[serial]
+	p, ok := m.procs[serial]
 	if !ok {
 		return fmt.Errorf("设备 %s 没有运行中的内嵌投屏", serial)
 	}
@@ -595,36 +597,36 @@ func (a *App) CloseEmbed(serial string) error {
 		procCloseHandle.Call(wp.mutex)
 		wp.mutex = 0
 	}
-	delete(embedProcs, serial)
+	delete(m.procs, serial)
 	delete(winProcs, serial)
 	return nil
 }
 
 // EmbedStatus 返回内嵌投屏运行状态（含其他 Andmaid 进程启动的内嵌投屏）
-func (a *App) EmbedStatus() map[string]bool {
-	embedMu.Lock()
+func (m *Manager) EmbedStatus() map[string]bool {
+	m.mu.Lock()
 	local := make(map[string]bool)
-	for s := range embedProcs {
+	for s := range m.procs {
 		local[s] = true
 	}
-	embedMu.Unlock()
+	m.mu.Unlock()
 
-	m := make(map[string]bool)
+	status := make(map[string]bool)
 	for s := range local {
-		m[s] = true
+		status[s] = true
 	}
 	// 已停的本机会话不要再探
-	if out, err := a.runAdb("devices"); err == nil {
+	if out, err := adb.Exec("devices"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			fields := strings.Fields(strings.TrimSpace(line))
 			if len(fields) >= 2 && fields[1] == "device" {
 				if embedMutexExists(fields[0]) {
-					m[fields[0]] = true
+					status[fields[0]] = true
 				}
 			}
 		}
 	}
-	return m
+	return status
 }
 
 var winProcs = make(map[string]*winEmbedProcess)

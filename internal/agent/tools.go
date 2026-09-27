@@ -1,4 +1,5 @@
-package main
+// Agent 工具执行 + 设备上下文（设备信息带入系统提示）。
+package agent
 
 import (
 	"encoding/json"
@@ -10,18 +11,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"andmaid/internal/adb"
+	"andmaid/internal/device"
 )
 
-// Agent 工具执行 + 设备上下文（设备信息带入系统提示）。
-
 // pickSerial 选目标设备：显式 serial 非空校验存在；空则取第一台在线设备
-func (a *App) pickSerial(serial string) (string, error) {
+func (ag *Service) pickSerial(serial string) (string, error) {
 	serial = strings.TrimSpace(serial)
-	devices, err := a.ListDevices()
+	devices, err := ag.devices.ListDevices()
 	if err != nil {
 		return "", err
 	}
-	var online []Device
+	var online []device.Device
 	for _, d := range devices {
 		if d.State == "device" {
 			online = append(online, d)
@@ -42,8 +44,8 @@ func (a *App) pickSerial(serial string) (string, error) {
 }
 
 // agentDeviceContext 汇总设备信息给系统提示（无设备时返回占位说明）
-func (a *App) agentDeviceContext(serial string) string {
-	devices, err := a.ListDevices()
+func (ag *Service) agentDeviceContext(serial string) string {
+	devices, err := ag.devices.ListDevices()
 	var b strings.Builder
 	if err != nil {
 		return fmt.Sprintf("（设备列表获取失败: %v）", err)
@@ -69,11 +71,11 @@ func (a *App) agentDeviceContext(serial string) string {
 	}
 	// 第一台在线设备的简要信息直接带入
 	if len(serials) > 0 {
-		if info := a.agentDeviceInfoBrief(serials[0]); info != "" {
+		if info := ag.agentDeviceInfoBrief(serials[0]); info != "" {
 			b.WriteString("\n第一台在线设备（" + serials[0] + "）信息：\n" + info)
 		}
 	}
-	sessions := a.ScreenStatus()
+	sessions := ag.devices.ScreenStatus()
 	if len(sessions) > 0 {
 		keys := make([]string, 0, len(sessions))
 		for k := range sessions {
@@ -86,20 +88,20 @@ func (a *App) agentDeviceContext(serial string) string {
 }
 
 // agentDeviceInfoBrief 简要设备信息（属性名 + 值）
-func (a *App) agentDeviceInfoBrief(serial string) string {
+func (ag *Service) agentDeviceInfoBrief(serial string) string {
 	props := map[string]string{
-		"Android 版本":  "ro.build.version.release",
-		"SDK":         "ro.build.version.sdk",
-		"型号":          "ro.product.model",
-		"品牌":          "ro.product.brand",
-		"Android ID":  "",
+		"Android 版本": "ro.build.version.release",
+		"SDK":        "ro.build.version.sdk",
+		"型号":         "ro.product.model",
+		"品牌":         "ro.product.brand",
+		"Android ID": "",
 	}
 	var lines []string
 	for label, prop := range props {
 		if prop == "" {
 			continue
 		}
-		out, err := a.runAdb("-s", serial, "shell", "getprop", prop)
+		out, err := adb.Exec("-s", serial, "shell", "getprop", prop)
 		if err != nil {
 			continue
 		}
@@ -108,7 +110,7 @@ func (a *App) agentDeviceInfoBrief(serial string) string {
 		}
 	}
 	// 分辨率
-	if out, err := a.runAdb("-s", serial, "shell", "wm", "size"); err == nil {
+	if out, err := adb.Exec("-s", serial, "shell", "wm", "size"); err == nil {
 		if v := strings.TrimSpace(out); v != "" {
 			lines = append(lines, "分辨率 "+strings.ReplaceAll(v, "\n", " "))
 		}
@@ -118,7 +120,7 @@ func (a *App) agentDeviceInfoBrief(serial string) string {
 }
 
 // execAgentTool 按工具名执行，返回给模型的结果文本（总是字符串，错误也作为文本返回）
-func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
+func (ag *Service) execAgentTool(defaultSerial, name, argsJSON string) string {
 	var args map[string]interface{}
 	if s := strings.TrimSpace(argsJSON); s != "" {
 		if err := json.Unmarshal([]byte(s), &args); err != nil {
@@ -139,11 +141,11 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		return nil
 	}
 	serialOr := func() string { return argStr("serial") }
-	resolve := func() (string, error) { return a.pickSerial(serialOr()) }
+	resolve := func() (string, error) { return ag.pickSerial(serialOr()) }
 
 	switch name {
 	case "list_devices":
-		devices, err := a.ListDevices()
+		devices, err := ag.devices.ListDevices()
 		if err != nil {
 			return "错误: " + err.Error()
 		}
@@ -161,10 +163,10 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if err != nil {
 			return "错误: " + err.Error()
 		}
-		return a.agentDeviceInfo(serial)
+		return ag.agentDeviceInfo(serial)
 
 	case "list_screens":
-		sessions := a.ScreenStatus()
+		sessions := ag.devices.ScreenStatus()
 		if len(sessions) == 0 {
 			return "当前没有运行中的投屏会话"
 		}
@@ -180,7 +182,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if err != nil {
 			return "错误: " + err.Error()
 		}
-		if err := a.OpenScreen(serial); err != nil {
+		if err := ag.devices.OpenScreen(serial); err != nil {
 			return "错误: " + err.Error()
 		}
 		return "已对设备 " + serial + " 开启投屏窗口"
@@ -190,7 +192,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if sid == "" {
 			return "错误: sessionId 不能为空"
 		}
-		if err := a.CloseScreen(sid); err != nil {
+		if err := ag.devices.CloseScreen(sid); err != nil {
 			return "错误: " + err.Error()
 		}
 		return "已关闭投屏会话 " + sid
@@ -206,7 +208,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		}
 		// Agent 场景禁用虚拟显示器：input tap / uiautomator dump 只作用于
 		// 主屏（display 0），虚拟屏里的应用对注入和 dump 不可见，坐标全错。
-		if err := a.OpenAppScreenOnMain(serial, pkg); err != nil {
+		if err := ag.devices.OpenAppScreenOnMain(serial, pkg); err != nil {
 			return "错误: " + err.Error()
 		}
 		return "已在设备 " + serial + " 上开屏并启动应用 " + pkg + "（主屏模式）"
@@ -216,7 +218,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if err != nil {
 			return "错误: " + err.Error()
 		}
-		apps, err := a.ListApps(serial)
+		apps, err := ag.devices.ListApps(serial)
 		if err != nil {
 			return "错误: " + err.Error()
 		}
@@ -250,14 +252,14 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if cmdline == "" {
 			return "错误: command 不能为空"
 		}
-		return a.agentAdbShell(serial, cmdline)
+		return ag.agentAdbShell(serial, cmdline)
 
 	case "ui_dump":
 		serial, err := resolve()
 		if err != nil {
 			return "错误: " + err.Error()
 		}
-		return a.agentUIDump(serial)
+		return ag.agentUIDump(serial)
 
 	case "tap":
 		serial, err := resolve()
@@ -268,7 +270,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if x == nil || y == nil {
 			return "错误: x/y 必须为整数坐标"
 		}
-		out, err := a.runAdb("-s", serial, "shell", "input", "tap", fmt.Sprint(*x), fmt.Sprint(*y))
+		out, err := adb.Exec("-s", serial, "shell", "input", "tap", fmt.Sprint(*x), fmt.Sprint(*y))
 		if e := agentInputErr(out, err); e != "" {
 			return e
 		}
@@ -287,7 +289,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if d := argInt("durationMs"); d != nil && *d > 0 {
 			ms = *d
 		}
-		out, err := a.runAdb("-s", serial, "shell", "input", "swipe",
+		out, err := adb.Exec("-s", serial, "shell", "input", "swipe",
 			fmt.Sprint(*x), fmt.Sprint(*y), fmt.Sprint(*x), fmt.Sprint(*y), fmt.Sprint(ms))
 		if e := agentInputErr(out, err); e != "" {
 			return e
@@ -307,7 +309,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if d := argInt("durationMs"); d != nil && *d > 0 {
 			ms = *d
 		}
-		out, err := a.runAdb("-s", serial, "shell", "input", "swipe",
+		out, err := adb.Exec("-s", serial, "shell", "input", "swipe",
 			fmt.Sprint(*x1), fmt.Sprint(*y1), fmt.Sprint(*x2), fmt.Sprint(*y2), fmt.Sprint(ms))
 		if e := agentInputErr(out, err); e != "" {
 			return e
@@ -323,7 +325,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 		if text == "" {
 			return "错误: text 不能为空"
 		}
-		return a.agentInputText(serial, text)
+		return ag.agentInputText(serial, text)
 
 	case "key_event":
 		serial, err := resolve()
@@ -343,7 +345,7 @@ func (a *App) execAgentTool(defaultSerial, name, argsJSON string) string {
 				return fmt.Sprintf("错误: 未知按键 %q，可用: back/home/enter/esc/menu/recent/volume_up/volume_down/power/tab/delete/search/dpad_up/dpad_down/dpad_left/dpad_right 或数字键码", key)
 			}
 		}
-		out, err := a.runAdb("-s", serial, "shell", "input", "keyevent", code)
+		out, err := adb.Exec("-s", serial, "shell", "input", "keyevent", code)
 		if e := agentInputErr(out, err); e != "" {
 			return e
 		}
@@ -391,16 +393,16 @@ func agentInputErr(out string, err error) string {
 }
 
 // agentDeviceInfo 详细设备信息（tool 用）
-func (a *App) agentDeviceInfo(serial string) string {
+func (ag *Service) agentDeviceInfo(serial string) string {
 	get := func(prop string) string {
-		out, err := a.runAdb("-s", serial, "shell", "getprop", prop)
+		out, err := adb.Exec("-s", serial, "shell", "getprop", prop)
 		if err != nil {
 			return ""
 		}
 		return strings.TrimSpace(out)
 	}
 	shell := func(args ...string) string {
-		out, err := a.runAdb(append([]string{"-s", serial, "shell"}, args...)...)
+		out, err := adb.Exec(append([]string{"-s", serial, "shell"}, args...)...)
 		if err != nil {
 			return ""
 		}
@@ -447,7 +449,7 @@ func (a *App) agentDeviceInfo(serial string) string {
 }
 
 // agentAdbShell 执行受限白名单外的只读 shell 命令（dumpsys/getprop/ps/ls 等）
-func (a *App) agentAdbShell(serial, cmdline string) string {
+func (ag *Service) agentAdbShell(serial, cmdline string) string {
 	// 危险命令黑名单：写操作一律拒绝，Agent 只读。
 	// 管道允许（grep/head 等纯读），但每段都过黑名单；重定向写入仍拒绝。
 	lower := strings.ToLower(cmdline)
@@ -462,7 +464,7 @@ func (a *App) agentAdbShell(serial, cmdline string) string {
 	if strings.Contains(lower, ">") {
 		return "拒绝执行: 不允许重定向写文件"
 	}
-	out, err := a.runAdbTimeout(30*time.Second, "-s", serial, "shell", cmdline)
+	out, err := adb.ExecTimeout(30*time.Second, "-s", serial, "shell", cmdline)
 	if err != nil {
 		return "错误: " + err.Error() + "\n" + out
 	}
@@ -483,11 +485,11 @@ const adbKeyboardIME = "com.android.adbkeyboard/.AdbIME"
 // 纯 ASCII 用 input text 直输；含非 ASCII 时经 ADBKeyboard 广播输入
 // （input text 不支持中文）。ADBKeyboard 未装/未启用时自动安装（bin/ADBKeyboard.apk）
 // 并切换，输入完恢复原输入法。
-func (a *App) agentInputText(serial, text string) string {
+func (ag *Service) agentInputText(serial, text string) string {
 	if isASCII(text) {
 		escaped := strings.ReplaceAll(text, `%`, `\%`)
 		escaped = strings.ReplaceAll(escaped, ` `, `%s`)
-		if out, err := a.runAdb("-s", serial, "shell", "input", "text", escaped); err != nil {
+		if out, err := adb.Exec("-s", serial, "shell", "input", "text", escaped); err != nil {
 			return "错误: 输入失败 " + err.Error() + " " + out
 		}
 		return "已输入文本: " + text
@@ -495,12 +497,12 @@ func (a *App) agentInputText(serial, text string) string {
 
 	// 非 ASCII：走 ADBKeyboard
 	origIME := ""
-	if out, err := a.runAdb("-s", serial, "shell", "settings", "get", "secure", "default_input_method"); err == nil {
+	if out, err := adb.Exec("-s", serial, "shell", "settings", "get", "secure", "default_input_method"); err == nil {
 		origIME = strings.TrimSpace(out)
 	}
 	installed := false
 	enabled := false
-	if out, err := a.runAdb("-s", serial, "shell", "ime", "list", "-s"); err == nil {
+	if out, err := adb.Exec("-s", serial, "shell", "ime", "list", "-s"); err == nil {
 		installed = strings.Contains(out, "com.android.adbkeyboard")
 		enabled = installed // ime list -s 只列已启用的
 	}
@@ -508,34 +510,34 @@ func (a *App) agentInputText(serial, text string) string {
 
 	if !enabled {
 		if !installed {
-			apk := filepath.Join(binDir, "ADBKeyboard.apk")
+			apk := filepath.Join(exeDir(), "ADBKeyboard.apk")
 			if _, err := os.Stat(apk); err != nil {
 				return "错误: 设备未装 ADBKeyboard 且程序目录缺少 bin/ADBKeyboard.apk，无法中文输入。当前输入: " + text
 			}
-			if out, err := a.runAdbTimeout(60*time.Second, "-s", serial, "install", "-r", "-g", apk); err != nil {
+			if out, err := adb.ExecTimeout(60*time.Second, "-s", serial, "install", "-r", "-g", apk); err != nil {
 				return "错误: 自动安装 ADBKeyboard 失败 " + err.Error() + " " + out
 			}
 		}
-		if out, err := a.runAdb("-s", serial, "shell", "ime", "enable", adbKeyboardIME); err != nil {
+		if out, err := adb.Exec("-s", serial, "shell", "ime", "enable", adbKeyboardIME); err != nil {
 			return "错误: 启用 ADBKeyboard 失败 " + err.Error() + " " + out
 		}
 	}
 	if needSwitch {
-		if out, err := a.runAdb("-s", serial, "shell", "ime", "set", adbKeyboardIME); err != nil {
+		if out, err := adb.Exec("-s", serial, "shell", "ime", "set", adbKeyboardIME); err != nil {
 			return "错误: 切换 ADBKeyboard 失败 " + err.Error() + " " + out
 		}
 		defer func() {
 			// 恢复原输入法，失败不打扰主流程
-			_, _ = a.runAdb("-s", serial, "shell", "ime", "set", origIME)
+			_, _ = adb.Exec("-s", serial, "shell", "ime", "set", origIME)
 		}()
 	} else if origIME == "" {
 		// 无默认输入法（少见），用完恢复到可读性无保障，同样切走
-		if out, err := a.runAdb("-s", serial, "shell", "ime", "set", adbKeyboardIME); err != nil {
+		if out, err := adb.Exec("-s", serial, "shell", "ime", "set", adbKeyboardIME); err != nil {
 			return "错误: 切换 ADBKeyboard 失败 " + err.Error() + " " + out
 		}
 	}
 
-	out, err := a.runAdb("-s", serial, "shell", "am", "broadcast",
+	out, err := adb.Exec("-s", serial, "shell", "am", "broadcast",
 		"-a", "ADB_INPUT_TEXT", "--es", "msg", text)
 	if err != nil {
 		return "错误: ADBKeyboard 广播失败 " + err.Error() + " " + out
@@ -557,14 +559,14 @@ func isASCII(s string) bool {
 
 // agentUIDump 用 uiautomator dump 导出当前屏幕控件树，提取可交互元素及坐标。
 // 模型看不到屏幕，靠这个定位点击点。
-func (a *App) agentUIDump(serial string) string {
+func (ag *Service) agentUIDump(serial string) string {
 	const dumpPath = "/sdcard/window_dump.xml"
 	var xml string
 	var lastOut string
 	// 最多 3 次：页面忙等 idle、部分 ROM 写文件慢、偶发空产物
 	for i := 0; i < 3; i++ {
-		_, _ = a.runAdbTimeout(5*time.Second, "-s", serial, "shell", "rm", "-f", dumpPath)
-		out, err := a.runAdbTimeout(30*time.Second, "-s", serial, "shell", "uiautomator", "dump", dumpPath)
+		_, _ = adb.ExecTimeout(5*time.Second, "-s", serial, "shell", "rm", "-f", dumpPath)
+		out, err := adb.ExecTimeout(30*time.Second, "-s", serial, "shell", "uiautomator", "dump", dumpPath)
 		lastOut = strings.TrimSpace(out)
 		if err != nil || strings.Contains(out, "ERROR") || strings.Contains(out, "could not get idle") {
 			// 连续两次 busy 直接放弃：视频/动画页永远进不了 idle
@@ -577,9 +579,9 @@ func (a *App) agentUIDump(serial string) string {
 		// dump 命令返回时文件可能尚未完全落盘，等一拍再读（实测 500ms 稳定）
 		time.Sleep(500 * time.Millisecond)
 		// exec-out 无 pty，输出不被 \r\n 污染；失败回退 shell cat
-		data, err := a.runAdbTimeout(15*time.Second, "-s", serial, "exec-out", "cat", dumpPath)
+		data, err := adb.ExecTimeout(15*time.Second, "-s", serial, "exec-out", "cat", dumpPath)
 		if err != nil || !strings.Contains(data, "<node") {
-			data, err = a.runAdbTimeout(15*time.Second, "-s", serial, "shell", "cat", dumpPath)
+			data, err = adb.ExecTimeout(15*time.Second, "-s", serial, "shell", "cat", dumpPath)
 		}
 		// 必须包含 <node 才算有效：部分 ROM 忽略路径参数或写延迟，cat 读到空/旧壳
 		if err == nil && strings.Contains(data, "<node") {
@@ -693,3 +695,19 @@ func agentParseUIDump(xml string) string {
 
 var nodeRe = regexp.MustCompile(`(?s)<node([^>]*?)/?>`)
 var boundsRe = regexp.MustCompile(`\[(\d+),(\d+)\]\[(\d+),(\d+)\]`)
+
+// exeDir 返回当前进程可执行文件目录（找 ADBKeyboard.apk 等资源用）
+func exeDir() string {
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Dir(exe)
+	}
+	return "."
+}
+
+// firstLine 取文本第一行（截断超长 adb 输出用）
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}

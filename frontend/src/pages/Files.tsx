@@ -47,7 +47,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime'
 import PageHeader from '../components/PageHeader'
-import type { main } from '../../wailsjs/go/models'
+import type { filemgr } from '../../wailsjs/go/models'
 
 const { Text } = Typography
 
@@ -61,7 +61,7 @@ interface FilesPageProps {
   serial?: string
 }
 
-interface Entry extends main.FileEntry {}
+interface Entry extends filemgr.FileEntry {}
 
 interface InstallProgressEvent {
   serial: string
@@ -94,7 +94,7 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
   const [devices, setDevices] = React.useState<Device[]>([])
   const [serial, setSerial] = React.useState(fixedSerial || '')
   const [storage, setStorage] = React.useState('')
-  const [storages, setStorages] = React.useState<main.DeviceStorage[]>([])
+  const [storages, setStorages] = React.useState<filemgr.DeviceStorage[]>([])
   const [path, setPath] = React.useState('')
   const [entries, setEntries] = React.useState<Entry[]>([])
   const [loading, setLoading] = React.useState(false)
@@ -496,7 +496,7 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
           {
             title: '名称',
             dataIndex: 'name',
-            width: 320,
+            width: 310,
             ellipsis: true,
             render: (_: unknown, e: Entry) => (
               <Tooltip content={e.name}>

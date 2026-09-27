@@ -1,22 +1,9 @@
 import React from 'react'
-import {
-  Button,
-  Card,
-  Input,
-  InputNumber,
-  Message,
-  Select,
-  Space,
-  Switch,
-  Tabs,
-  Tooltip,
-  Typography,
-} from '@arco-design/web-react'
-import { IconRefresh, IconSave } from '@arco-design/web-react/icon'
 import { GetAISettings, GetSettings, ListDevices, ListEncoders, ResetSettings, SaveAISettings, SaveSettings } from '../../wailsjs/go/main/App'
 import PageHeader from '../components/PageHeader'
-
-const { Text } = Typography
+import { Btn, NumberInput, TextInput, Tip, Toggle } from '../components/ui'
+import { IconRefresh, IconSave } from '../components/icons'
+import { Message } from '../components/Toast'
 
 // ---------- 类型 ----------
 interface AndroidApp {
@@ -129,20 +116,19 @@ interface Settings {
 }
 
 // ---------- 通用控件 ----------
+
 const Row: React.FC<{
   label: string
   hint?: string
   children: React.ReactNode
 }> = ({ label, hint, children }) => (
-  <div style={{ display: 'flex', alignItems: 'center', minHeight: 40, gap: 12 }}>
-    <div style={{ width: 150, flexShrink: 0 }}>
-      <Text>{label}</Text>
+  <div className="set-row">
+    <div className="set-row-label">
+      {label}
       {hint && (
-        <Tooltip content={hint}>
-          <Text type="secondary" style={{ marginLeft: 4, cursor: 'help' }}>
-            ?
-          </Text>
-        </Tooltip>
+        <Tip tip={hint}>
+          <button type="button" className="hint" aria-label={`说明：${label}`}>?</button>
+        </Tip>
       )}
     </div>
     <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
@@ -156,7 +142,7 @@ const SwitchRow: React.FC<{
   onChange: (v: boolean) => void
 }> = ({ label, hint, value, onChange }) => (
   <Row label={label} hint={hint}>
-    <Switch checked={!!value} onChange={onChange} />
+    <Toggle isSelected={!!value} onChange={onChange} ariaLabel={label} />
   </Row>
 )
 
@@ -168,15 +154,11 @@ const TextRow: React.FC<{
   onChange: (v: string) => void
 }> = ({ label, hint, placeholder, value, onChange }) => (
   <Row label={label} hint={hint}>
-    <Input
-      value={value ?? ''}
-      placeholder={placeholder}
-      allowClear
-      onChange={onChange}
-    />
+    <TextInput value={value ?? ''} placeholder={placeholder} onChange={onChange} ariaLabel={label} />
   </Row>
 )
 
+// 原生 select 足够：设置页选项都是短枚举，无需虚拟列表
 const SelectRow: React.FC<{
   label: string
   hint?: string
@@ -185,19 +167,18 @@ const SelectRow: React.FC<{
   onChange: (v: string) => void
 }> = ({ label, hint, options, value, onChange }) => (
   <Row label={label} hint={hint}>
-    <Select
-      value={value || undefined}
-      placeholder="默认"
-      allowClear
-      style={{ width: '100%' }}
-      onChange={onChange}
+    <select
+      className="field"
+      style={{ width: '100%', paddingRight: 6 }}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
     >
+      <option value="">默认</option>
       {options.map((o) => (
-        <Select.Option key={o} value={o}>
-          {o}
-        </Select.Option>
+        <option key={o} value={o}>{o}</option>
       ))}
-    </Select>
+    </select>
   </Row>
 )
 
@@ -211,15 +192,7 @@ const NumRow: React.FC<{
   onChange: (v: number | null) => void
 }> = ({ label, hint, min, max, step, value, onChange }) => (
   <Row label={label} hint={hint}>
-    <InputNumber
-      value={value ?? undefined}
-      min={min}
-      max={max}
-      step={step}
-      placeholder="默认"
-      style={{ width: '100%' }}
-      onChange={onChange}
-    />
+    <NumberInput value={value ?? null} min={min} max={max} step={step} onChange={onChange} />
   </Row>
 )
 
@@ -259,7 +232,7 @@ const AISettingsPane: React.FC<{
   ai: AISettings
   setAI: React.Dispatch<React.SetStateAction<AISettings>>
 }> = ({ ai, setAI }) => {
-  const set = (k: keyof AISettings, v: any) => setAI((prev) => ({ ...prev, [k]: v }))
+  const set = (k: keyof AISettings, v: unknown) => setAI((prev) => ({ ...prev, [k]: v }))
 
   return (
     <div>
@@ -286,31 +259,33 @@ const AISettingsPane: React.FC<{
         onChange={(v) => set('model', v)}
       />
       <Row label="温度" hint="采样温度 0~2，越小越确定；留空用接口默认">
-        <InputNumber
-          value={ai.temperature ?? undefined}
+        <NumberInput
+          value={ai.temperature ?? null}
           min={0}
           max={2}
           step={0.1}
-          placeholder="默认"
-          style={{ width: '100%' }}
-          onChange={(v) => set('temperature', v ?? null)}
+          onChange={(v) => set('temperature', v)}
         />
       </Row>
-      <Section title="Agent 行为" />
-      <Row label="附加提示词" hint="拼接到 Agent 系统提示末尾，约束回答风格或补充设备使用背景">
-        <Input.TextArea
+      <Row label="系统提示词" hint="追加在默认提示词之后的补充指令">
+        <textarea
+          className="textarea"
+          rows={3}
           value={ai.systemPrompt ?? ''}
-          placeholder="如：这是一台测试机，回答尽量简短"
-          autoSize={{ minRows: 3, maxRows: 8 }}
-          onChange={(v) => set('systemPrompt', v)}
+          onChange={(e) => set('systemPrompt', e.target.value)}
+          placeholder="可选"
         />
       </Row>
     </div>
   )
 }
 
-// ---------- 页面 ----------
+// ---------- 主页面 ----------
+
+const TABS = ['基础', '视频', '声音', '输入控制', '录制', '连接', '高级', 'AI'] as const
+
 const SettingsPage: React.FC = () => {
+  const [tab, setTab] = React.useState<(typeof TABS)[number]>('基础')
   const [s, setS] = React.useState<Settings>({})
   const [ai, setAI] = React.useState<AISettings>({})
   const [loading, setLoading] = React.useState(false)
@@ -328,16 +303,18 @@ const SettingsPage: React.FC = () => {
     try {
       const v = await GetSettings()
       setS((v as Settings) ?? {})
-    } catch (e: any) {
-      Message.error(`读取设置失败: ${e?.message ?? e}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      Message.error(`读取设置失败: ${msg}`)
     } finally {
       setLoading(false)
     }
     try {
       const a = await GetAISettings()
       setAI((a as AISettings) ?? {})
-    } catch (e: any) {
-      Message.error(`读取 AI 设置失败: ${e?.message ?? e}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      Message.error(`读取 AI 设置失败: ${msg}`)
     }
   }, [])
 
@@ -369,9 +346,9 @@ const SettingsPage: React.FC = () => {
     try {
       const list = (await ListEncoders(serial, codec ?? '')) as VideoEncoder[]
       setEncoders(list ?? [])
-    } catch (e: any) {
+    } catch (e: unknown) {
       setEncoders([])
-      setEncodersError(`${e?.message ?? e}`)
+      setEncodersError(`${e instanceof Error ? e.message : e}`)
     } finally {
       setEncodersLoading(false)
     }
@@ -393,11 +370,12 @@ const SettingsPage: React.FC = () => {
   const save = async () => {
     setSaving(true)
     try {
-      await SaveSettings(s as any)
-      await SaveAISettings(ai as any)
+      await SaveSettings(s as never)
+      await SaveAISettings(ai as never)
       Message.success('设置已保存')
-    } catch (e: any) {
-      Message.error(`保存失败: ${e?.message ?? e}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      Message.error(`保存失败: ${msg}`)
     } finally {
       setSaving(false)
     }
@@ -408,216 +386,247 @@ const SettingsPage: React.FC = () => {
       await ResetSettings()
       setS({})
       Message.success('已恢复默认')
-    } catch (e: any) {
-      Message.error(`重置失败: ${e?.message ?? e}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      Message.error(`重置失败: ${msg}`)
     }
   }
 
-  const sw = (k: keyof Settings) => (v: boolean) => set(k, v as any)
+  const sw = (k: keyof Settings) => (v: boolean) => set(k, v as never)
   const tx = (k: keyof Settings) => (v: string) => set(k, v)
   const sel = (k: keyof Settings) => (v: string) => set(k, v)
   const num = (k: keyof Settings) => (v: number | null) => set(k, v)
 
   return (
-    <Card loading={loading} className="settings-card">
+    <div className="page-card">
       <PageHeader
         title={
-          <Space size={8}>
+          <>
             设置
-            <Tooltip content="恢复默认">
-              <Button icon={<IconRefresh />} onClick={reset} />
-            </Tooltip>
-            <Tooltip content="保存设置">
-              <Button icon={<IconSave />} loading={saving} onClick={save} />
-            </Tooltip>
-          </Space>
+            <Tip tip="恢复默认">
+              <Btn iconOnly onPress={reset} aria-label="恢复默认">
+                <IconRefresh />
+              </Btn>
+            </Tip>
+            <Tip tip="保存设置">
+              <Btn iconOnly loading={saving} onPress={save} aria-label="保存设置">
+                <IconSave />
+              </Btn>
+            </Tip>
+          </>
         }
       />
 
-      <Tabs className="settings-grid" destroyOnHide={false} lazyload>
-        {/* ================= 基础 ================= */}
-        <Tabs.TabPane key="basic" title="基础">
-          <Section title="设备行为" />
-          <SwitchRow label="保持设备唤醒" hint="-w, --stay-awake：投屏期间设备连接时保持不休眠" value={s.stayAwake} onChange={sw('stayAwake')} />
-          <SwitchRow label="关闭设备屏幕" hint="-S, --turn-screen-off：启动后立即关闭设备屏幕" value={s.turnScreenOff} onChange={sw('turnScreenOff')} />
-          <SwitchRow label="显示触摸点" hint="-t, --show-touches：显示物理触摸点（退出时恢复）" value={s.showTouches} onChange={sw('showTouches')} />
-          <SwitchRow label="禁用屏保" hint="--disable-screensaver：投屏期间禁用电脑屏保" value={s.disableScreensaver} onChange={sw('disableScreensaver')} />
+      {loading && (
+        <div style={{ padding: 8 }}>
+          <span className="muted">读取中…</span>
+        </div>
+      )}
 
-          <Section title="窗口" />
-          <SwitchRow label="全屏启动" hint="-f, --fullscreen" value={s.fullscreen} onChange={sw('fullscreen')} />
-          <SwitchRow label="窗口置顶" hint="--always-on-top" value={s.alwaysOnTop} onChange={sw('alwaysOnTop')} />
-          <SwitchRow label="无边框窗口" hint="--window-borderless" value={s.windowBorderless} onChange={sw('windowBorderless')} />
-          <TextRow label="窗口标题" hint="--window-title，留空使用设备序列号" placeholder="默认为设备序列号" value={s.windowTitle} onChange={tx('windowTitle')} />
-          <TextRow label="窗口 X 位置" hint="--window-x，默认 auto" placeholder="auto" value={s.windowX} onChange={tx('windowX')} />
-          <TextRow label="窗口 Y 位置" hint="--window-y，默认 auto" placeholder="auto" value={s.windowY} onChange={tx('windowY')} />
-          <NumRow label="窗口宽度" hint="--window-width，0 为自动" min={0} value={s.windowWidth ?? null} onChange={num('windowWidth')} />
-          <NumRow label="窗口高度" hint="--window-height，0 为自动" min={0} value={s.windowHeight ?? null} onChange={num('windowHeight')} />
-        </Tabs.TabPane>
+      <div className="tabs">
+        <div className="tabs-list" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              className="tab"
+              aria-selected={tab === t}
+              data-selected={tab === t || undefined}
+              onClick={() => setTab(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <div className="tabs-panel" role="tabpanel">
+          {/* 非当前 tab 不渲染，切 tab 保留组件状态没必要——值都在 s/ai state 里 */}
+          {tab === '基础' && (
+            <div className="settings-grid">
+              <Section title="设备行为" />
+              <SwitchRow label="保持设备唤醒" hint="-w, --stay-awake：投屏期间设备连接时保持不休眠" value={s.stayAwake} onChange={sw('stayAwake')} />
+              <SwitchRow label="关闭设备屏幕" hint="-S, --turn-screen-off：启动后立即关闭设备屏幕" value={s.turnScreenOff} onChange={sw('turnScreenOff')} />
+              <SwitchRow label="显示触摸点" hint="-t, --show-touches：显示物理触摸点（退出时恢复）" value={s.showTouches} onChange={sw('showTouches')} />
+              <SwitchRow label="禁用屏保" hint="--disable-screensaver：投屏期间禁用电脑屏保" value={s.disableScreensaver} onChange={sw('disableScreensaver')} />
 
-        {/* ================= 视频 ================= */}
-        <Tabs.TabPane key="video" title="视频">
-          <Section title="编码" />
-          <TextRow label="视频码率" hint="-b, --video-bit-rate，支持 K/M 后缀，默认 8M" placeholder="8M" value={s.videoBitRate} onChange={tx('videoBitRate')} />
-          <NumRow label="最大尺寸" hint="-m, --max-size：限制宽高，0 为不限" min={0} value={s.maxSize ?? null} onChange={num('maxSize')} />
-          <NumRow label="最大帧率" hint="--max-fps，Android 10+ 官方支持" min={1} max={120} value={s.maxFps ?? null} onChange={num('maxFps')} />
-          <SelectRow label="视频编码" hint="--video-codec" options={VIDEO_CODECS} value={s.videoCodec} onChange={sel('videoCodec')} />
-          <Row label="视频编码器" hint="--video-encoder，从设备实读可用编码器（随「视频编码」变化），也可手动输入">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Select
-                value={s.videoEncoder || undefined}
-                placeholder="默认"
-                allowClear
-                allowCreate
-                showSearch
-                loading={encodersLoading}
-                style={{ flex: 3, minWidth: 120 }}
-                onChange={(v) => set('videoEncoder', v)}
-                notFoundContent={encodersError ? encodersError : '无设备连接，可手动输入'}
-              >
-                {encoders.map((e) => (
-                  <Select.Option key={e.name} value={e.name} disabled={e.alias}>
-                    {e.name}
-                    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                      {e.hardware ? '硬件' : '软件'}
-                      {e.alias ? '（别名）' : ''}
-                    </Text>
-                  </Select.Option>
-                ))}
-              </Select>
-              <Select
-                value={encoderSerial || undefined}
-                placeholder="设备"
-                style={{ flex: 1, flexShrink: 1, width: 150, maxWidth: 180, minWidth: 0 }}
-                onChange={(v) => setEncoderSerial(v)}
-              >
-                {devices.map((d) => (
-                  <Select.Option key={d.serial} value={d.serial}>
-                    {d.serial}
-                  </Select.Option>
-                ))}
-              </Select>
-              <Button icon={<IconRefresh />} loading={encodersLoading} onClick={() => { refreshDevices(); fetchEncoders(encoderSerial, s.videoCodec) }} />
+              <Section title="窗口" />
+              <SwitchRow label="全屏启动" hint="-f, --fullscreen" value={s.fullscreen} onChange={sw('fullscreen')} />
+              <SwitchRow label="窗口置顶" hint="--always-on-top" value={s.alwaysOnTop} onChange={sw('alwaysOnTop')} />
+              <SwitchRow label="无边框窗口" hint="--window-borderless" value={s.windowBorderless} onChange={sw('windowBorderless')} />
+              <TextRow label="窗口标题" hint="--window-title，留空使用设备序列号" placeholder="默认为设备序列号" value={s.windowTitle} onChange={tx('windowTitle')} />
+              <TextRow label="窗口 X 位置" hint="--window-x，默认 auto" placeholder="auto" value={s.windowX} onChange={tx('windowX')} />
+              <TextRow label="窗口 Y 位置" hint="--window-y，默认 auto" placeholder="auto" value={s.windowY} onChange={tx('windowY')} />
+              <NumRow label="窗口宽度" hint="--window-width，0 为自动" min={0} value={s.windowWidth ?? null} onChange={num('windowWidth')} />
+              <NumRow label="窗口高度" hint="--window-height，0 为自动" min={0} value={s.windowHeight ?? null} onChange={num('windowHeight')} />
             </div>
-          </Row>
-          <TextRow label="编码器选项" hint="--video-codec-options，key[:type]=value[,...]，详见 Android MediaFormat 文档" placeholder="如 i-frame-interval=10" value={s.videoCodecOptions} onChange={tx('videoCodecOptions')} />
-          <NumRow label="视频缓冲(ms)" hint="--video-buffer，加延迟抗抖动，默认 0" min={0} value={s.videoBuffer ?? null} onChange={num('videoBuffer')} />
-          <SelectRow label="渲染驱动" hint="--render-driver：direct3d/opengl/opengles2/opengles/metal/software" options={RENDER_DRIVERS} value={s.renderDriver} onChange={sel('renderDriver')} />
+          )}
 
-          <Section title="画面来源" />
-          <SelectRow label="视频来源" hint="--video-source：display 屏幕或 camera 摄像头（摄像头需 Android 12+）" options={['display', 'camera']} value={s.videoSource} onChange={sel('videoSource')} />
-          <TextRow label="显示器 ID" hint="--display-id，默认 0（--list-displays 可列出）" placeholder="0" value={s.displayId} onChange={tx('displayId')} />
-          <TextRow label="新建虚拟显示器" hint='--new-display，如 1920x1080、1920x1080/420、/240（仅密度）' placeholder="如 1920x1080/420" value={s.newDisplay} onChange={tx('newDisplay')} />
-          <TextRow label="裁剪区域" hint="--crop，格式 width:height:x:y，按设备自然方向" placeholder="如 1080:1920:0:0" value={s.crop} onChange={tx('crop')} />
+          {tab === '视频' && (
+            <div className="settings-grid">
+              <Section title="编码" />
+              <TextRow label="视频码率" hint="-b, --video-bit-rate，支持 K/M 后缀，默认 8M" placeholder="8M" value={s.videoBitRate} onChange={tx('videoBitRate')} />
+              <NumRow label="最大尺寸" hint="-m, --max-size：限制宽高，0 为不限" min={0} value={s.maxSize ?? null} onChange={num('maxSize')} />
+              <NumRow label="最大帧率" hint="--max-fps，Android 10+ 官方支持" min={1} max={120} value={s.maxFps ?? null} onChange={num('maxFps')} />
+              <SelectRow label="视频编码" hint="--video-codec" options={VIDEO_CODECS} value={s.videoCodec} onChange={sel('videoCodec')} />
+              <Row label="视频编码器" hint="--video-encoder，从设备实读可用编码器（随「视频编码」变化），也可手动输入">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <select
+                    className="field"
+                    style={{ flex: 3, minWidth: 120 }}
+                    value={s.videoEncoder ?? ''}
+                    onChange={(e) => set('videoEncoder', e.target.value)}
+                    aria-label="视频编码器"
+                  >
+                    <option value="">{encodersLoading ? '读取中…' : '默认'}</option>
+                    {encoders.map((e) => (
+                      <option key={e.name} value={e.name} disabled={e.alias}>
+                        {e.name}（{e.hardware ? '硬件' : '软件'}{e.alias ? '，别名' : ''}）
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="field"
+                    style={{ flex: 1, width: 150, maxWidth: 180, minWidth: 0 }}
+                    value={encoderSerial}
+                    onChange={(e) => setEncoderSerial(e.target.value)}
+                    aria-label="编码器读取设备"
+                  >
+                    <option value="">设备</option>
+                    {devices.map((d) => (
+                      <option key={d.serial} value={d.serial}>{d.serial}</option>
+                    ))}
+                  </select>
+                  <Btn iconOnly loading={encodersLoading} onPress={() => { refreshDevices(); fetchEncoders(encoderSerial, s.videoCodec) }} aria-label="重新读取编码器">
+                    <IconRefresh />
+                  </Btn>
+                </div>
+                {encodersError && <div className="app-picker-error" style={{ fontSize: 12, marginTop: 4 }}>{encodersError}</div>}
+              </Row>
+              <TextRow label="编码器选项" hint="--video-codec-options，key[:type]=value[,...]，详见 Android MediaFormat 文档" placeholder="如 i-frame-interval=10" value={s.videoCodecOptions} onChange={tx('videoCodecOptions')} />
+              <NumRow label="视频缓冲(ms)" hint="--video-buffer，加延迟抗抖动，默认 0" min={0} value={s.videoBuffer ?? null} onChange={num('videoBuffer')} />
+              <SelectRow label="渲染驱动" hint="--render-driver：direct3d/opengl/opengles2/opengles/metal/software" options={RENDER_DRIVERS} value={s.renderDriver} onChange={sel('renderDriver')} />
 
-          <Section title="方向" />
-          <SelectRow label="采集方向" hint="--capture-orientation，可加 @ 前缀锁定旋转（如 @90 或 @）" options={ORIENTATIONS} value={s.captureOrientation} onChange={sel('captureOrientation')} />
-          <SelectRow label="显示方向" hint="--display-orientation" options={ORIENTATIONS} value={s.displayOrientation} onChange={sel('displayOrientation')} />
-          <NumRow label="旋转角度" hint="--angle：顺时针旋转视频内容（度）" min={0} max={360} value={s.angle ?? null} onChange={num('angle')} />
+              <Section title="画面来源" />
+              <SelectRow label="视频来源" hint="--video-source：display 屏幕或 camera 摄像头（摄像头需 Android 12+）" options={['display', 'camera']} value={s.videoSource} onChange={sel('videoSource')} />
+              <TextRow label="显示器 ID" hint="--display-id，默认 0（--list-displays 可列出）" placeholder="0" value={s.displayId} onChange={tx('displayId')} />
+              <TextRow label="新建虚拟显示器" hint='--new-display，如 1920x1080、1920x1080/420、/240（仅密度）' placeholder="如 1920x1080/420" value={s.newDisplay} onChange={tx('newDisplay')} />
+              <TextRow label="裁剪区域" hint="--crop，格式 width:height:x:y，按设备自然方向" placeholder="如 1080:1920:0:0" value={s.crop} onChange={tx('crop')} />
 
-          <Section title="关闭项" />
-          <SwitchRow label="禁用视频转发" hint="--no-video" value={s.noVideo} onChange={sw('noVideo')} />
-          <SwitchRow label="禁用视频播放" hint="--no-video-playback：不在本机播放画面" value={s.noVideoPlayback} onChange={sw('noVideoPlayback')} />
-          <SwitchRow label="无窗口" hint="--no-window，隐含 --no-video-playback" value={s.noWindow} onChange={sw('noWindow')} />
-          <SwitchRow label="出错不降清晰度" hint="--no-downsize-on-error：MediaCodec 出错时不自动降低分辨率重试" value={s.noDownsizeOnError} onChange={sw('noDownsizeOnError')} />
-          <SwitchRow label="禁用 mipmap" hint="--no-mipmaps：禁用缩小画面时的 mipmap 生成" value={s.noMipmaps} onChange={sw('noMipmaps')} />
-          <SwitchRow label="打印 FPS" hint="--print-fps：控制台输出帧率（MOD+i 可随时开关）" value={s.printFps} onChange={sw('printFps')} />
-          <SelectRow label="IME 显示策略" hint="--display-ime-policy（虚拟显示器）" options={IME_POLICIES} value={s.displayImePolicy} onChange={sel('displayImePolicy')} />
-          <SwitchRow label="虚拟屏保留内容" hint="--no-vd-destroy-content：关闭虚拟显示器时应用移回主屏而非销毁" value={s.noVdDestroyContent} onChange={sw('noVdDestroyContent')} />
-          <SwitchRow label="虚拟屏禁用系统装饰" hint="--no-vd-system-decorations" value={s.noVdSystemDecorations} onChange={sw('noVdSystemDecorations')} />
-        </Tabs.TabPane>
+              <Section title="方向" />
+              <SelectRow label="采集方向" hint="--capture-orientation，可加 @ 前缀锁定旋转（如 @90 或 @）" options={ORIENTATIONS} value={s.captureOrientation} onChange={sel('captureOrientation')} />
+              <SelectRow label="显示方向" hint="--display-orientation" options={ORIENTATIONS} value={s.displayOrientation} onChange={sel('displayOrientation')} />
+              <NumRow label="旋转角度" hint="--angle：顺时针旋转视频内容（度）" min={0} max={360} value={s.angle ?? null} onChange={num('angle')} />
 
-        {/* ================= 声音 ================= */}
-        <Tabs.TabPane key="audio" title="声音">
-          <Section title="开关" />
-          <SwitchRow label="禁用音频转发" hint="--no-audio" value={s.noAudio} onChange={sw('noAudio')} />
-          <SwitchRow label="禁用音频播放" hint="--no-audio-playback：不在本机播放声音" value={s.noAudioPlayback} onChange={sw('noAudioPlayback')} />
-          <SwitchRow label="音频失败即退出" hint="--require-audio：默认音频采集失败时仅静音视频，开启后直接失败" value={s.requireAudio} onChange={sw('requireAudio')} />
-          <SwitchRow label="音频复制" hint="--audio-dup：设备继续播放的同时转发音频，仅 --audio-source=playback 时可用" value={s.audioDup} onChange={sw('audioDup')} />
+              <Section title="关闭项" />
+              <SwitchRow label="禁用视频转发" hint="--no-video" value={s.noVideo} onChange={sw('noVideo')} />
+              <SwitchRow label="禁用视频播放" hint="--no-video-playback：不在本机播放画面" value={s.noVideoPlayback} onChange={sw('noVideoPlayback')} />
+              <SwitchRow label="无窗口" hint="--no-window，隐含 --no-video-playback" value={s.noWindow} onChange={sw('noWindow')} />
+              <SwitchRow label="出错不降清晰度" hint="--no-downsize-on-error：MediaCodec 出错时不自动降低分辨率重试" value={s.noDownsizeOnError} onChange={sw('noDownsizeOnError')} />
+              <SwitchRow label="禁用 mipmap" hint="--no-mipmaps：禁用缩小画面时的 mipmap 生成" value={s.noMipmaps} onChange={sw('noMipmaps')} />
+              <SwitchRow label="打印 FPS" hint="--print-fps：控制台输出帧率（MOD+i 可随时开关）" value={s.printFps} onChange={sw('printFps')} />
+              <SelectRow label="IME 显示策略" hint="--display-ime-policy（虚拟显示器）" options={IME_POLICIES} value={s.displayImePolicy} onChange={sel('displayImePolicy')} />
+              <SwitchRow label="虚拟屏保留内容" hint="--no-vd-destroy-content：关闭虚拟显示器时应用移回主屏而非销毁" value={s.noVdDestroyContent} onChange={sw('noVdDestroyContent')} />
+              <SwitchRow label="虚拟屏禁用系统装饰" hint="--no-vd-system-decorations" value={s.noVdSystemDecorations} onChange={sw('noVdSystemDecorations')} />
+            </div>
+          )}
 
-          <Section title="编码与来源" />
-          <TextRow label="音频码率" hint="--audio-bit-rate，支持 K/M 后缀，默认 128K" placeholder="128K" value={s.audioBitRate} onChange={tx('audioBitRate')} />
-          <SelectRow label="音频编码" hint="--audio-codec" options={AUDIO_CODECS} value={s.audioCodec} onChange={sel('audioCodec')} />
-          <TextRow label="音频编码器" hint="--audio-encoder，具体 MediaCodec 编码器名" placeholder="默认" value={s.audioEncoder} onChange={tx('audioEncoder')} />
-          <TextRow label="编码器选项" hint="--audio-codec-options，key[:type]=value[,...]" placeholder="如 bitrate=64000" value={s.audioCodecOptions} onChange={tx('audioCodecOptions')} />
-          <SelectRow label="音频来源" hint="--audio-source：output 整体输出 / playback 应用播放（应用可拒绝）/ mic 及各类麦克风 / voice-call 通话" options={AUDIO_SOURCES} value={s.audioSource} onChange={sel('audioSource')} />
+          {tab === '声音' && (
+            <div className="settings-grid">
+              <Section title="开关" />
+              <SwitchRow label="禁用音频转发" hint="--no-audio" value={s.noAudio} onChange={sw('noAudio')} />
+              <SwitchRow label="禁用音频播放" hint="--no-audio-playback：不在本机播放声音" value={s.noAudioPlayback} onChange={sw('noAudioPlayback')} />
+              <SwitchRow label="音频失败即退出" hint="--require-audio：默认音频采集失败时仅静音视频，开启后直接失败" value={s.requireAudio} onChange={sw('requireAudio')} />
+              <SwitchRow label="音频复制" hint="--audio-dup：设备继续播放的同时转发音频，仅 --audio-source=playback 时可用" value={s.audioDup} onChange={sw('audioDup')} />
 
-          <Section title="缓冲" />
-          <NumRow label="音频缓冲(ms)" hint="--audio-buffer：低延迟但易卡顿，默认 50" min={0} value={s.audioBuffer ?? null} onChange={num('audioBuffer')} />
-          <NumRow label="输出缓冲(ms)" hint="--audio-output-buffer：出现机器人音时调大（如 10），默认 5，其余情况勿改" min={0} value={s.audioOutputBuffer ?? null} onChange={num('audioOutputBuffer')} />
-        </Tabs.TabPane>
+              <Section title="编码与来源" />
+              <TextRow label="音频码率" hint="--audio-bit-rate，支持 K/M 后缀，默认 128K" placeholder="128K" value={s.audioBitRate} onChange={tx('audioBitRate')} />
+              <SelectRow label="音频编码" hint="--audio-codec" options={AUDIO_CODECS} value={s.audioCodec} onChange={sel('audioCodec')} />
+              <TextRow label="音频编码器" hint="--audio-encoder，具体 MediaCodec 编码器名" placeholder="默认" value={s.audioEncoder} onChange={tx('audioEncoder')} />
+              <TextRow label="编码器选项" hint="--audio-codec-options，key[:type]=value[,...]" placeholder="如 bitrate=64000" value={s.audioCodecOptions} onChange={tx('audioCodecOptions')} />
+              <SelectRow label="音频来源" hint="--audio-source：output 整体输出 / playback 应用播放（应用可拒绝）/ mic 及各类麦克风 / voice-call 通话" options={AUDIO_SOURCES} value={s.audioSource} onChange={sel('audioSource')} />
 
-        {/* ================= 输入控制 ================= */}
-        <Tabs.TabPane key="input" title="输入控制">
-          <Section title="总开关" />
-          <SwitchRow label="只读模式" hint="-n, --no-control：镜像画面但禁止控制设备" value={s.noControl} onChange={sw('noControl')} />
-          <SwitchRow label="OTG 模式" hint="--otg：模拟物理键鼠，无需 USB 调试，不镜像画面，仅 USB" value={s.otg} onChange={sw('otg')} />
+              <Section title="缓冲" />
+              <NumRow label="音频缓冲(ms)" hint="--audio-buffer：低延迟但易卡顿，默认 50" min={0} value={s.audioBuffer ?? null} onChange={num('audioBuffer')} />
+              <NumRow label="输出缓冲(ms)" hint="--audio-output-buffer：出现机器人音时调大（如 10），默认 5，其余情况勿改" min={0} value={s.audioOutputBuffer ?? null} onChange={num('audioOutputBuffer')} />
+            </div>
+          )}
 
-          <Section title="输入方式" />
-          <SelectRow label="键盘" hint="--keyboard：sdk 系统 API / uhid 模拟物理键盘 / aoa AOAv2 协议（仅 USB）；uhid/aoa 需在设备上配置键盘布局" options={KBM_MODES} value={s.keyboard} onChange={sel('keyboard')} />
-          <SelectRow label="鼠标" hint="--mouse：sdk / uhid / aoa / disabled" options={KBM_MODES} value={s.mouse} onChange={sel('mouse')} />
-          <SelectRow label="手柄" hint="--gamepad：disabled / uhid / aoa" options={GAMEPAD_MODES} value={s.gamepad} onChange={sel('gamepad')} />
-          <TextRow label="鼠标键绑定" hint="--mouse-bind：4 字符序列[:次序列]，字符 +-=bhsn，默认 sdk 为 bhsn:++++，aoa/uhid 为 ++++:bhsn" placeholder="bhsn:++++" value={s.mouseBind} onChange={tx('mouseBind')} />
+          {tab === '输入控制' && (
+            <div className="settings-grid">
+              <Section title="总开关" />
+              <SwitchRow label="只读模式" hint="-n, --no-control：镜像画面但禁止控制设备" value={s.noControl} onChange={sw('noControl')} />
+              <SwitchRow label="OTG 模式" hint="--otg：模拟物理键鼠，无需 USB 调试，不镜像画面，仅 USB" value={s.otg} onChange={sw('otg')} />
 
-          <Section title="按键行为" />
-          <SwitchRow label="文本注入优先" hint="--prefer-text：字母与空格按文本注入，避免组合键问题，但游戏 WASD 行为会变" value={s.preferText} onChange={sw('preferText')} />
-          <SwitchRow label="原始按键事件" hint="--raw-key-events" value={s.rawKeyEvents} onChange={sw('rawKeyEvents')} />
-          <SwitchRow label="禁用按键重复" hint="--no-key-repeat：长按不重复发送按键事件" value={s.noKeyRepeat} onChange={sw('noKeyRepeat')} />
-          <SwitchRow label="禁用鼠标悬停" hint="--no-mouse-hover：不转发无点击的鼠标移动" value={s.noMouseHover} onChange={sw('noMouseHover')} />
+              <Section title="输入方式" />
+              <SelectRow label="键盘" hint="--keyboard：sdk 系统 API / uhid 模拟物理键盘 / aoa AOAv2 协议（仅 USB）；uhid/aoa 需在设备上配置键盘布局" options={KBM_MODES} value={s.keyboard} onChange={sel('keyboard')} />
+              <SelectRow label="鼠标" hint="--mouse：sdk / uhid / aoa / disabled" options={KBM_MODES} value={s.mouse} onChange={sel('mouse')} />
+              <SelectRow label="手柄" hint="--gamepad：disabled / uhid / aoa" options={GAMEPAD_MODES} value={s.gamepad} onChange={sel('gamepad')} />
+              <TextRow label="鼠标键绑定" hint="--mouse-bind：4 字符序列[:次序列]，字符 +-=bhsn，默认 sdk 为 bhsn:++++，aoa/uhid 为 ++++:bhsn" placeholder="bhsn:++++" value={s.mouseBind} onChange={tx('mouseBind')} />
 
-          <Section title="剪贴板" />
-          <SwitchRow label="兼容粘贴" hint="--legacy-paste：Ctrl+v 时以按键事件序列注入电脑剪贴板文本（部分设备异常时的变通）" value={s.legacyPaste} onChange={sw('legacyPaste')} />
-          <SwitchRow label="禁用剪贴板自动同步" hint="--no-clipboard-autosync" value={s.noClipboardAutosync} onChange={sw('noClipboardAutosync')} />
+              <Section title="按键行为" />
+              <SwitchRow label="文本注入优先" hint="--prefer-text：字母与空格按文本注入，避免组合键问题，但游戏 WASD 行为会变" value={s.preferText} onChange={sw('preferText')} />
+              <SwitchRow label="原始按键事件" hint="--raw-key-events" value={s.rawKeyEvents} onChange={sw('rawKeyEvents')} />
+              <SwitchRow label="禁用按键重复" hint="--no-key-repeat：长按不重复发送按键事件" value={s.noKeyRepeat} onChange={sw('noKeyRepeat')} />
+              <SwitchRow label="禁用鼠标悬停" hint="--no-mouse-hover：不转发无点击的鼠标移动" value={s.noMouseHover} onChange={sw('noMouseHover')} />
 
-          <Section title="快捷键" />
-          <SelectRow label="快捷键修饰键" hint="--shortcut-mod：lctrl/rctrl/lalt/ralt/lsuper/rsuper，多组用英文逗号分隔，默认 lalt,lsuper" options={SHORTCUT_MOD_OPTIONS} value={s.shortcutMod} onChange={sel('shortcutMod')} />
-        </Tabs.TabPane>
+              <Section title="剪贴板" />
+              <SwitchRow label="兼容粘贴" hint="--legacy-paste：Ctrl+v 时以按键事件序列注入电脑剪贴板文本（部分设备异常时的变通）" value={s.legacyPaste} onChange={sw('legacyPaste')} />
+              <SwitchRow label="禁用剪贴板自动同步" hint="--no-clipboard-autosync" value={s.noClipboardAutosync} onChange={sw('noClipboardAutosync')} />
 
-        {/* ================= 录制 ================= */}
-        <Tabs.TabPane key="record" title="录制">
-          <Section title="录制" />
-          <TextRow label="录制文件路径" hint="-r, --record：录制到文件（.mp4/.mkv/.m4a/.mka/.opus/.aac/.flac/.wav）" placeholder="如 D:\\record.mp4" value={s.record} onChange={tx('record')} />
-          <SelectRow label="录制格式" hint="--record-format：留空按文件扩展名推断" options={REC_FORMATS} value={s.recordFormat} onChange={sel('recordFormat')} />
-          <SelectRow label="录制方向" hint="--record-orientation" options={REC_ORIENTATIONS} value={s.recordOrientation} onChange={sel('recordOrientation')} />
-          <Section title="文件推送" />
-          <TextRow label="推送目录" hint="--push-target：拖放文件推送到设备的目录，默认 /sdcard/Download/" placeholder="/sdcard/Download/" value={s.pushTarget} onChange={tx('pushTarget')} />
-        </Tabs.TabPane>
+              <Section title="快捷键" />
+              <SelectRow label="快捷键修饰键" hint="--shortcut-mod：lctrl/rctrl/lalt/ralt/lsuper/rsuper，多组用英文逗号分隔，默认 lalt,lsuper" options={SHORTCUT_MOD_OPTIONS} value={s.shortcutMod} onChange={sel('shortcutMod')} />
+            </div>
+          )}
 
-        {/* ================= 连接 ================= */}
-        <Tabs.TabPane key="network" title="连接">
-          <Section title="设备选择" />
-          <SwitchRow label="指定 USB 设备" hint="-d, --select-usb：仅有一台 USB 设备时使用" value={s.selectUsb} onChange={sw('selectUsb')} />
-          <SwitchRow label="指定 TCP/IP 设备" hint="-e, --select-tcpip：仅有一台 TCP/IP 设备时使用" value={s.selectTcpip} onChange={sw('selectTcpip')} />
-          <TextRow label="TCP/IP 地址" hint='--tcpip[=[+]ip[:port]]：填 ip:port 直接连接；+ip 强制重连；留空自动查找当前设备 IP 并启用 TCP/IP 模式' placeholder="如 192.168.1.100:5555" value={s.tcpip} onChange={tx('tcpip')} />
+          {tab === '录制' && (
+            <div className="settings-grid">
+              <Section title="录制" />
+              <TextRow label="录制文件路径" hint="-r, --record：录制到文件（.mp4/.mkv/.m4a/.mka/.opus/.aac/.flac/.wav）" placeholder="如 D:\record.mp4" value={s.record} onChange={tx('record')} />
+              <SelectRow label="录制格式" hint="--record-format：留空按文件扩展名推断" options={REC_FORMATS} value={s.recordFormat} onChange={sel('recordFormat')} />
+              <SelectRow label="录制方向" hint="--record-orientation" options={REC_ORIENTATIONS} value={s.recordOrientation} onChange={sel('recordOrientation')} />
+              <Section title="文件推送" />
+              <TextRow label="推送目录" hint="--push-target：拖放文件推送到设备的目录，默认 /sdcard/Download/" placeholder="/sdcard/Download/" value={s.pushTarget} onChange={tx('pushTarget')} />
+            </div>
+          )}
 
-          <Section title="端口与隧道" />
-          <TextRow label="本地监听端口" hint="-p, --port，格式 port[:port]，默认 27183:27199" placeholder="27183:27199" value={s.port} onChange={tx('port')} />
-          <TextRow label="隧道主机" hint="--tunnel-host，默认 localhost，设置后自动启用 --force-adb-forward" placeholder="localhost" value={s.tunnelHost} onChange={tx('tunnelHost')} />
-          <NumRow label="隧道端口" hint="--tunnel-port，0 为不强制" min={0} max={65535} value={s.tunnelPort ?? null} onChange={num('tunnelPort')} />
-          <SwitchRow label="强制 adb 转发" hint="--force-adb-forward：不尝试 adb reverse" value={s.forceAdbForward} onChange={sw('forceAdbForward')} />
-          <SwitchRow label="退出时关闭 adb" hint="--kill-adb-on-close" value={s.killAdbOnClose} onChange={sw('killAdbOnClose')} />
-        </Tabs.TabPane>
+          {tab === '连接' && (
+            <div className="settings-grid">
+              <Section title="设备选择" />
+              <SwitchRow label="指定 USB 设备" hint="-d, --select-usb：仅有一台 USB 设备时使用" value={s.selectUsb} onChange={sw('selectUsb')} />
+              <SwitchRow label="指定 TCP/IP 设备" hint="-e, --select-tcpip：仅有一台 TCP/IP 设备时使用" value={s.selectTcpip} onChange={sw('selectTcpip')} />
+              <TextRow label="TCP/IP 地址" hint='--tcpip[=[+]ip[:port]]：填 ip:port 直接连接；+ip 强制重连；留空自动查找当前设备 IP 并启用 TCP/IP 模式' placeholder="如 192.168.1.100:5555" value={s.tcpip} onChange={tx('tcpip')} />
 
-        {/* ================= 高级 ================= */}
-        <Tabs.TabPane key="advanced" title="高级">
-          <Section title="日志与退出" />
-          <SelectRow label="日志级别" hint="-V, --verbosity" options={VERBOSITY} value={s.verbosity} onChange={sel('verbosity')} />
-          <SelectRow label="退出暂停" hint="--pause-on-exit：true 总是暂停 / false 从不 / if-error 仅出错时（防终端自动关闭）" options={['true', 'false', 'if-error']} value={s.pauseOnExit} onChange={sel('pauseOnExit')} />
+              <Section title="端口与隧道" />
+              <TextRow label="本地监听端口" hint="-p, --port，格式 port[:port]，默认 27183:27199" placeholder="27183:27199" value={s.port} onChange={tx('port')} />
+              <TextRow label="隧道主机" hint="--tunnel-host，默认 localhost，设置后自动启用 --force-adb-forward" placeholder="localhost" value={s.tunnelHost} onChange={tx('tunnelHost')} />
+              <NumRow label="隧道端口" hint="--tunnel-port，0 为不强制" min={0} max={65535} value={s.tunnelPort ?? null} onChange={num('tunnelPort')} />
+              <SwitchRow label="强制 adb 转发" hint="--force-adb-forward：不尝试 adb reverse" value={s.forceAdbForward} onChange={sw('forceAdbForward')} />
+              <SwitchRow label="退出时关闭 adb" hint="--kill-adb-on-close" value={s.killAdbOnClose} onChange={sw('killAdbOnClose')} />
+            </div>
+          )}
 
-          <Section title="电源与清理" />
-          <NumRow label="屏幕关闭超时(秒)" hint="--screen-off-timeout：投屏期间设备锁屏超时，退出时恢复" min={0} value={s.screenOffTimeout ?? null} onChange={num('screenOffTimeout')} />
-          <SwitchRow label="关闭时熄灭设备屏幕" hint="--power-off-on-close" value={s.powerOffOnClose} onChange={sw('powerOffOnClose')} />
-          <SwitchRow label="启动不点亮屏幕" hint="--no-power-on" value={s.noPowerOn} onChange={sw('noPowerOn')} />
-          <SwitchRow label="退出不清理" hint="--no-cleanup：不从设备删除 server，不恢复触摸显示/保活/电源状态" value={s.noCleanup} onChange={sw('noCleanup')} />
+          {tab === '高级' && (
+            <div className="settings-grid">
+              <Section title="日志与退出" />
+              <SelectRow label="日志级别" hint="-V, --verbosity" options={VERBOSITY} value={s.verbosity} onChange={sel('verbosity')} />
+              <SelectRow label="退出暂停" hint="--pause-on-exit：true 总是暂停 / false 从不 / if-error 仅出错时（防终端自动关闭）" options={['true', 'false', 'if-error']} value={s.pauseOnExit} onChange={sel('pauseOnExit')} />
 
-          <Section title="应用与限时" />
-          <TextRow label="启动应用" hint='--start-app：包名；? 前缀按名称前缀匹配；+ 前缀先强制停止；可组合 +?，如 +?firefox' placeholder="如 com.example.app" value={s.startApp} onChange={tx('startApp')} />
-          <NumRow label="镜像时限(秒)" hint="--time-limit：最长投屏时间" min={0} value={s.timeLimit ?? null} onChange={num('timeLimit')} />
-        </Tabs.TabPane>
-        <Tabs.TabPane key="ai" title="AI">
-          <AISettingsPane ai={ai} setAI={setAI} />
-        </Tabs.TabPane>
-      </Tabs>
-    </Card>
+              <Section title="电源与清理" />
+              <NumRow label="屏幕关闭超时(秒)" hint="--screen-off-timeout：投屏期间设备锁屏超时，退出时恢复" min={0} value={s.screenOffTimeout ?? null} onChange={num('screenOffTimeout')} />
+              <SwitchRow label="关闭时熄灭设备屏幕" hint="--power-off-on-close" value={s.powerOffOnClose} onChange={sw('powerOffOnClose')} />
+              <SwitchRow label="启动不点亮屏幕" hint="--no-power-on" value={s.noPowerOn} onChange={sw('noPowerOn')} />
+              <SwitchRow label="退出不清理" hint="--no-cleanup：不从设备删除 server，不恢复触摸显示/保活/电源状态" value={s.noCleanup} onChange={sw('noCleanup')} />
+
+              <Section title="应用与限时" />
+              <TextRow label="启动应用" hint='--start-app：包名；? 前缀按名称前缀匹配；+ 前缀先强制停止；可组合 +?，如 +?firefox' placeholder="如 com.example.app" value={s.startApp} onChange={tx('startApp')} />
+              <NumRow label="镜像时限(秒)" hint="--time-limit：最长投屏时间" min={0} value={s.timeLimit ?? null} onChange={num('timeLimit')} />
+            </div>
+          )}
+
+          {tab === 'AI' && <AISettingsPane ai={ai} setAI={setAI} />}
+        </div>
+      </div>
+    </div>
   )
 }
 

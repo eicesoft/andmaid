@@ -1,3 +1,52 @@
+/* ============ 设计 tokens ============ */
+:root {
+  /* 底色 */
+  --bg: #f8f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f0ec;
+  --surface-3: #eeedec;
+  --fill-1: #f7f7f5;
+  --fill-2: #f1f1ee;
+  --fill-3: #e8e7e3;
+
+  /* 描边 */
+  --line: #e7e6e2;
+  --line-2: #dcdbd6;
+
+  /* 文字 */
+  --ink-1: #2b2a27;
+  --ink-2: #5c5a55;
+  --ink-3: #8c8a86;
+  --ink-4: #c2c0bc;
+
+  /* 主色（炭灰 #303030）与语义色 */
+  --accent: #303030;
+  --accent-hover: #3f3f3f;
+  --accent-active: #262626;
+  --accent-weak: #f0efec;
+  --accent-weak-2: #e3e2de;
+
+  --success: #16a34a;
+  --success-weak: #ecfdf3;
+  --danger: #dc2626;
+  --danger-weak: #fef2f2;
+  --warn: #d97706;
+  --warn-weak: #fef6e7;
+  --info: #2563eb;
+  --info-weak: #eff6ff;
+
+  /* 圆角 / 阴影 */
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-icon: 10px;
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.16);
+  --shadow-toast: 0 6px 20px rgba(0, 0, 0, 0.12);
+
+  /* 字体 */
+  --font: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -10,8 +59,62 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--ink-1);
+  background: var(--bg);
 }
 
 #root {
   height: 100%;
+}
+
+/* 文本可选区域（聊天、终端输出等） */
+.selectable,
+.selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 次要文字 */
+.muted {
+  color: var(--ink-3);
+}
+.muted-2 {
+  color: var(--ink-4);
+  font-size: 12px;
+}
+
+/* 全局滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.24);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  user-select: text;
+  -webkit-user-select: text;
 }

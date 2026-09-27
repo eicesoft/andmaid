@@ -1,13 +1,11 @@
 import React from 'react'
-import { Button, Card, Input, Message, Select, Spin, Tag, Typography } from '@arco-design/web-react'
-import { IconSend, IconLoading, IconTool } from '@arco-design/web-react/icon'
 import { EventsOn } from '../../wailsjs/runtime'
 import { AgentChat, ListDevices } from '../../wailsjs/go/main/App'
 import { agent } from '../../wailsjs/go/models'
 import PageHeader from '../components/PageHeader'
-
-const { Text } = Typography
-const { TextArea } = Input
+import { Btn, Float, TextInput } from '../components/ui'
+import { IconSend, IconTool, Spinner } from '../components/icons'
+import { Message } from '../components/Toast'
 
 interface Device {
   serial: string
@@ -45,6 +43,8 @@ const AgentPage: React.FC = () => {
   const [devices, setDevices] = React.useState<Device[]>([])
   const [serial, setSerial] = React.useState('')
   const [expandedTool, setExpandedTool] = React.useState('')
+  const [devOpen, setDevOpen] = React.useState(false)
+  const devBtnRef = React.useRef<HTMLSpanElement>(null)
   const bottomRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -147,8 +147,8 @@ const AgentPage: React.FC = () => {
         }
         return next
       })
-    } catch (e: any) {
-      const errMsg = `${e?.message ?? e}`
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e)
       setMessages((prev) => {
         const next = [...prev]
         const last = next[next.length - 1]
@@ -171,82 +171,72 @@ const AgentPage: React.FC = () => {
     }
   }
 
+  const inputRef = React.useRef<HTMLTextAreaElement>(null)
+  const autoSize = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 130)}px`
+  }
+
   return (
-    <Card className="settings-card" bodyStyle={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
+    <div className="page-card" style={{ height: 'calc(100vh - 8px)' }}>
       <PageHeader
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-            <span>Agent</span>
-            <Select
-              size="mini"
-              style={{ width: 220 }}
-              value={serial || undefined}
-              placeholder="选择设备"
-              onChange={setSerial}
-            >
-              {devices.map((d) => (
-                <Select.Option key={d.serial} value={d.serial}>
-                  {d.model || d.serial}（{d.serial}）
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
+          <>
+            Agent
+            <span ref={devBtnRef}>
+              <Btn size="mini" onPress={() => setDevOpen(true)} aria-expanded={devOpen}>
+                {serial || '选择设备'}
+              </Btn>
+            </span>
+            <Float open={devOpen} onOpenChange={setDevOpen} triggerRef={devBtnRef}>
+              <div className="device-terminal-quickmenu" style={{ width: 260 }}>
+                {devices.map((d) => (
+                  <div
+                    key={d.serial}
+                    className="device-terminal-quickitem"
+                    onClick={() => {
+                      setSerial(d.serial)
+                      setDevOpen(false)
+                    }}
+                  >
+                    {d.serial === serial ? '✓ ' : ''}{d.model || d.serial}（{d.serial}）
+                  </div>
+                ))}
+                {devices.length === 0 && <div className="device-terminal-quickitem muted">无在线设备</div>}
+              </div>
+            </Float>
+          </>
         }
       />
 
       {/* 消息区 */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px', minHeight: 0 }} className="no-scrollbar">
+      <div className="chat-scroll selectable no-scrollbar">
         {messages.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--color-text-3)', marginTop: 80 }}>
-            <Text type="secondary">
-              设备助手：可以让我查设备信息、开/关投屏、启动应用。
-              <br />
-              例如「帮我看看这台设备的电量，然后开启投屏」
-            </Text>
+          <div className="chat-empty">
+            设备助手：可以让我查设备信息、开/关投屏、启动应用。
+            <br />
+            例如「帮我看看这台设备的电量，然后开启投屏」
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 12 }}>
-            <div
-              style={{
-                maxWidth: '78%',
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: m.role === 'user' ? 'var(--color-primary-light-1)' : 'var(--color-fill-2)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                lineHeight: 1.6,
-              }}
-            >
+          <div key={i} className={`chat-msg chat-msg--${m.role}`}>
+            <div className="chat-bubble">
               {m.toolCalls && m.toolCalls.length > 0 && (
-                <div style={{ marginBottom: m.content ? 8 : 0, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div className="chat-tools" style={{ marginBottom: m.content ? 8 : 0 }}>
                   {m.toolCalls.map((t, ti) => {
                     const open = expandedTool === `${i}-${t.id || ti}`
                     return (
                       <React.Fragment key={t.id || ti}>
-                        <Tag
-                          size="small"
-                          color={t.failed ? 'red' : t.result ? 'green' : 'arcoblue'}
-                          icon={<IconTool />}
-                          style={{ cursor: 'pointer', userSelect: 'none', margin: 0 }}
+                        <button
+                          type="button"
+                          className={`chat-tool ${t.failed ? 'chat-tool--fail' : t.result ? 'chat-tool--ok' : 'chat-tool--run'}`}
                           onClick={() => setExpandedTool(open ? '' : `${i}-${t.id || ti}`)}
                         >
+                          <IconTool />
                           {t.name} {t.result ? (t.failed ? '✗' : '✓') : '…'}
-                        </Tag>
+                        </button>
                         {open && (
-                          <pre
-                            style={{
-                              flexBasis: '100%',
-                              margin: 0,
-                              padding: '6px 8px',
-                              fontSize: 12,
-                              background: 'var(--color-fill-1)',
-                              borderRadius: 6,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              color: 'var(--color-text-2)',
-                            }}
-                          >
+                          <pre className="chat-tool-args">
                             {fmtArgs(t.args)}
                             {t.result && t.result !== 'ok' ? `\n→ ${t.result}` : ''}
                           </pre>
@@ -258,27 +248,33 @@ const AgentPage: React.FC = () => {
               )}
               {m.content}
               {m.streaming && m.content === '' && m.toolCalls && m.toolCalls.length > 0 && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <IconLoading spin /> 执行工具中…
+                <span className="chat-loading">
+                  <Spinner size={12} /> 执行工具中…
                 </span>
               )}
               {m.streaming && m.content === '' && (!m.toolCalls || m.toolCalls.length === 0) && (
-                <Spin size={16} style={{ display: 'inline-block' }} />
+                <span className="chat-loading">
+                  <Spinner size={12} />
+                </span>
               )}
             </div>
           </div>
         ))}
-        <div ref={bottomRef as any} />
+        <div ref={bottomRef} />
       </div>
 
       {/* 输入区 */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--color-fill-2)' }}>
-        <TextArea
+      <div className="chat-input-row">
+        <textarea
+          ref={inputRef}
+          className="textarea"
+          rows={1}
           value={input}
           placeholder="输入指令，Enter 发送，Shift+Enter 换行"
-          autoSize={{ minRows: 1, maxRows: 5 }}
-          style={{ resize: 'none' }}
-          onChange={setInput}
+          onChange={(e) => {
+            setInput(e.target.value)
+            autoSize(e.target)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
@@ -286,11 +282,17 @@ const AgentPage: React.FC = () => {
             }
           }}
         />
-        <Button type="primary" icon={<IconSend />} loading={busy} onClick={send} disabled={!input.trim() || !serial}>
+        <Btn
+          variant="primary"
+          loading={busy}
+          onPress={send}
+          isDisabled={!input.trim() || !serial}
+        >
+          <IconSend />
           发送
-        </Button>
+        </Btn>
       </div>
-    </Card>
+    </div>
   )
 }
 

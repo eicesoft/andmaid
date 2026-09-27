@@ -1,36 +1,5 @@
 import React from 'react'
 import {
-  Button,
-  Card,
-  Dropdown,
-  Input,
-  Menu,
-  Message,
-  Modal,
-  Progress,
-  Space,
-  Table,
-  Typography,
-  Tooltip,
-} from '@arco-design/web-react'
-import {
-  IconDownload,
-  IconCopy,
-  IconScissor,
-  IconDelete,
-  IconPlus,
-  IconUpload,
-  IconRefresh,
-  IconArrowUp,
-  IconRight,
-  IconFile,
-  IconFolder,
-  IconEdit,
-  IconPaste,
-  IconCompass,
-  IconExport,
-} from '@arco-design/web-react/icon'
-import {
   CopyDeviceFiles,
   DeleteFiles,
   DownloadFile,
@@ -47,9 +16,26 @@ import {
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime'
 import PageHeader from '../components/PageHeader'
+import { Btn, Float, ModalHost, TextInput, Tip, type ModalState } from '../components/ui'
+import {
+  IconArrowUp,
+  IconCompass,
+  IconCopy,
+  IconDelete,
+  IconDownload,
+  IconEdit,
+  IconExport,
+  IconFile,
+  IconFolder,
+  IconPaste,
+  IconPlus,
+  IconRefresh,
+  IconRight,
+  IconScissor,
+  IconUpload,
+} from '../components/icons'
+import { Message } from '../components/Toast'
 import type { filemgr } from '../../wailsjs/go/models'
-
-const { Text } = Typography
 
 interface Device {
   serial: string
@@ -104,6 +90,16 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
   const [installing, setInstalling] = React.useState<InstallProgressEvent | null>(null)
   const [uploadPct, setUploadPct] = React.useState<number | null>(null)
   const [editing, setEditing] = React.useState<{ title: string; label: string; value: string; ok: (v: string) => void } | null>(null)
+  const [editingValue, setEditingValue] = React.useState('')
+  const [modal, setModal] = React.useState<ModalState | null>(null)
+
+  // 下拉锚点
+  const devBtnRef = React.useRef<HTMLSpanElement>(null)
+  const storBtnRef = React.useRef<HTMLSpanElement>(null)
+  const quickBtnRef = React.useRef<HTMLSpanElement>(null)
+  const [devOpen, setDevOpen] = React.useState(false)
+  const [storOpen, setStorOpen] = React.useState(false)
+  const [quickOpen, setQuickOpen] = React.useState(false)
 
   const online = devices.filter((d) => d.state === 'device')
 
@@ -159,12 +155,12 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
     } catch (e) {
       Message.error(String(e))
     }
-  }, [fixedSerial, serial, list, loadStorages])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixedSerial])
 
   React.useEffect(() => {
     init()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [init])
 
   const switchDevice = async (sn: string) => {
     if (!sn || sn === serial) return
@@ -203,12 +199,17 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
 
   const selPaths = selected.map((name) => (path === '/' ? `/${name}` : `${path}/${name}`))
 
+  const toggleSel = (name: string) => {
+    setSelected((s) => (s.includes(name) ? s.filter((x) => x !== name) : [...s, name]))
+  }
+
   const doDelete = () => {
     if (selPaths.length === 0) return
-    Modal.confirm({
+    setModal({
       title: '删除确认',
-      content: `确定删除选中的 ${selected.length} 项？此操作不可恢复。`,
-      okButtonProps: { status: 'danger' },
+      okDanger: true,
+      okText: '删除',
+      children: `确定删除选中的 ${selected.length} 项？此操作不可恢复。`,
       onOk: async () => {
         try {
           await DeleteFiles(serial, selPaths)
@@ -217,6 +218,7 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
         } catch (e) {
           Message.error(String(e))
         }
+        setModal(null)
       },
     })
   }
@@ -250,6 +252,7 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
         }
       },
     })
+    setEditingValue(e.name)
   }
 
   const doNew = (isDir: boolean) => {
@@ -269,6 +272,7 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
         }
       },
     })
+    setEditingValue(isDir ? '新建文件夹' : '新建文件.txt')
   }
 
   const doDownload = async (e: Entry) => {
@@ -310,6 +314,9 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
     }
   }
 
+  const doInstallApk = InstallApk
+  void doInstallApk
+
   React.useEffect(() => {
     const off1 = EventsOn('install:progress', (p: InstallProgressEvent) => {
       setInstalling(p)
@@ -344,270 +351,377 @@ const FilesPage: React.FC<FilesPageProps> = ({ serial: fixedSerial }) => {
 
   const hasOnline = online.length > 0
 
+  // 编辑弹窗（新建/重命名共用）
+  const editingModal: ModalState | null = editing
+    ? {
+        title: editing.title,
+        children: (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label className="muted" style={{ fontSize: 12 }}>{editing.label}</label>
+            <TextInput
+              value={editingValue}
+              onChange={setEditingValue}
+              clearable={false}
+              ariaLabel={editing.label}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const v = editingValue
+                  if (!v.trim()) {
+                    Message.warning('名称不能为空')
+                    return
+                  }
+                  editing.ok(v)
+                  setEditing(null)
+                }
+              }}
+            />
+          </div>
+        ),
+        onOk: () => {
+          const v = editingValue
+          if (!v.trim()) {
+            Message.warning('名称不能为空')
+            return
+          }
+          editing.ok(v)
+          setEditing(null)
+        },
+      }
+    : null
+
+  // 删除确认（单行操作走这里，批量复用 doDelete 的 modal）
+  const confirmDeleteOne = (e: Entry) => {
+    setModal({
+      title: '删除确认',
+      okDanger: true,
+      okText: '删除',
+      children: `确定删除「${e.name}」？此操作不可恢复。`,
+      onOk: async () => {
+        const full = path === '/' ? `/${e.name}` : `${path}/${e.name}`
+        try {
+          await DeleteFiles(serial, [full])
+          Message.success('已删除')
+          list(serial, path, false)
+        } catch (err) {
+          Message.error(String(err))
+        }
+        setModal(null)
+      },
+    })
+  }
+
   return (
-    <Card className="files-card" bodyStyle={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className={`page-card page-card--pad-top`}>
       {!fixedSerial && (
         <PageHeader
           title={
-            <Space size={8}>
+            <>
               文件管理
-              <Typography.Text type="secondary">
-                {serial ? serial : '未选择设备'}
-              </Typography.Text>
-            </Space>
+              <span className="muted">{serial ? serial : '未选择设备'}</span>
+            </>
           }
-          extra={null}
         />
       )}
-      <div className="files-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Space size={4}>
-          <Tooltip content="后退">
-            <Button size="small" icon={<IconArrowUp style={{ transform: 'rotate(180deg)' }} />} disabled={history.length < 2} onClick={goBack} />
-          </Tooltip>
-          <Tooltip content="上级目录">
-            <Button size="small" icon={<IconArrowUp />} disabled={!path || path === '/'} onClick={goUp} />
-          </Tooltip>
-        </Space>
-        {/* 面包屑路径条 */}
-        <div className="files-crumbs">
-          {crumbs.map((c, i) => (
-            <span key={c.path} className="files-crumb">
-              {i > 0 && <IconRight className="files-crumb-sep" />}
-              <span
-                className="files-crumb-link"
-                onClick={() => c.path !== path && list(serial, c.path, true)}
-              >
-                {c.name}
-              </span>
-            </span>
-          ))}
-        </div>
-        <Space size={8} style={{ marginLeft: 'auto' }}>
-          {!fixedSerial && (
-            <Dropdown
-              trigger="click"
-              droplist={
-                <Menu>
-                  {online.map((d) => (
-                    <Menu.Item key={d.serial} onClick={() => switchDevice(d.serial)}>
-                      {d.serial === serial ? '✓ ' : ''}{d.model || d.serial}
-                    </Menu.Item>
-                  ))}
-                  {online.length === 0 && <Menu.Item key="none" disabled>无在线设备</Menu.Item>}
-                </Menu>
-              }
-            >
-              <Button size="small" disabled={!hasOnline}>
-                {serial ? `设备: ${serial}` : '选择设备'}
-              </Button>
-            </Dropdown>
-          )}
-          {storages.length > 1 && (
-            <Dropdown
-              trigger="click"
-              droplist={
-                <Menu>
-                  {storages.map((s) => (
-                    <Menu.Item key={s.id} onClick={() => switchStorage(s.id)}>
-                      {s.id === storage ? '✓ ' : ''}{s.description}
-                    </Menu.Item>
-                  ))}
-                </Menu>
-              }
-            >
-              <Button size="small">{storages.find((s) => s.id === storage)?.description || '存储'}</Button>
-            </Dropdown>
-          )}
-        </Space>
-      </div>
-
-      <div className="files-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <Space size={4}>
-          <Tooltip content="新建文件夹">
-            <Button size="small" icon={<IconPlus />} onClick={() => doNew(true)} />
-          </Tooltip>
-          <Tooltip content="上传文件">
-            <Button size="small" icon={<IconExport />} disabled={!hasOnline} loading={uploadPct !== null} onClick={doUpload} />
-          </Tooltip>
-          <Dropdown
-            trigger="click"
-            droplist={
-              <Menu>
-                {QUICK_DIRS.map((d) => (
-                  <Menu.Item key={d} onClick={() => {
-                    const target = storage === '/' ? `/${d}` : `${storage}/${d}`
-                    list(serial, target, true)
-                  }}>
-                    {d}
-                  </Menu.Item>
-                ))}
-              </Menu>
-            }
-          >
-            <Button size="small" icon={<IconCompass />} disabled={!hasOnline} />
-          </Dropdown>
-        </Space>
-        <Space size={4} style={{ marginLeft: 16 }}>
-          <Tooltip content="下载到本机">
-            <Button size="small" icon={<IconDownload />} disabled={selPaths.length === 0 || selPaths.length > 1} onClick={() => {
-              const e = entries.find((x) => x.name === selected[0])
-              if (e) doDownload(e)
-            }} />
-          </Tooltip>
-          <Tooltip content="复制">
-            <Button size="small" icon={<IconCopy />} disabled={selPaths.length === 0} onClick={() => { setClip({ op: 'copy', paths: selPaths }); Message.info(`已复制 ${selected.length} 项`) }} />
-          </Tooltip>
-          <Tooltip content="剪切">
-            <Button size="small" icon={<IconScissor />} disabled={selPaths.length === 0} onClick={() => { setClip({ op: 'cut', paths: selPaths }); Message.info(`已剪切 ${selected.length} 项`) }} />
-          </Tooltip>
-          <Tooltip content="删除">
-            <Button size="small" icon={<IconDelete />} disabled={selPaths.length === 0} status="danger" onClick={doDelete} />
-          </Tooltip>
-          {clip && (
-            <Tooltip content={`粘贴 ${clip.paths.length} 项`}>
-              <Button size="small" type="primary" icon={<IconPaste />} disabled={!hasOnline} onClick={doPaste} />
-            </Tooltip>
-          )}
-          <Tooltip content="安装 APK 到当前设备">
-            <Button size="small" icon={<IconUpload />} loading={!!installing} disabled={!hasOnline} onClick={doQuickInstall} />
-          </Tooltip>
-          <Tooltip content="刷新">
-            <Button size="small" icon={<IconRefresh />} loading={loading} onClick={() => list(serial, path, false)} />
-          </Tooltip>
-        </Space>
-      </div>
-
-      <Table
-        className="files-table"
-        size="small"
-        border={{ wrapper: false, cell: false }}
-        style={{ marginTop: 8 }}
-        loading={loading}
-        data={entries}
-        pagination={false}
-        rowKey="name"
-        rowSelection={{
-          type: 'checkbox',
-          selectedRowKeys: selected,
-          onChange: (keys: (string | number)[]) => setSelected(keys.map(String)),
-        }}
-        noDataElement={<Text type="secondary">{hasOnline ? '空目录' : '未检测到在线设备，请连接手机并开启 USB 调试'}</Text>}
-        columns={[
-          {
-            title: '名称',
-            dataIndex: 'name',
-            width: 310,
-            ellipsis: true,
-            render: (_: unknown, e: Entry) => (
-              <Tooltip content={e.name}>
-                <span className={`files-name ${e.isDir ? 'files-name--dir' : ''}`} onDoubleClick={() => openEntry(e)} onClick={() => e.isDir && openEntry(e)}>
-                  {e.isDir ? <IconFolder style={{ color: '#f7b500', marginRight: 6 }} /> : <IconFile style={{ color: 'var(--color-text-3)', marginRight: 6 }} />}
-                  {e.name}
+      <div className={`files-card-body ${fixedSerial ? '' : ''}`}>
+        <div className="files-toolbar">
+          <div style={{ display: 'flex', gap: 4 }}>
+            <Tip tip="后退">
+              <Btn size="small" iconOnly isDisabled={history.length < 2} onPress={goBack} aria-label="后退">
+                <IconArrowUp style={{ transform: 'rotate(180deg)' }} />
+              </Btn>
+            </Tip>
+            <Tip tip="上级目录">
+              <Btn size="small" iconOnly isDisabled={!path || path === '/'} onPress={goUp} aria-label="上级目录">
+                <IconArrowUp />
+              </Btn>
+            </Tip>
+          </div>
+          {/* 面包屑路径条 */}
+          <div className="files-crumbs">
+            {crumbs.map((c, i) => (
+              <span key={c.path} className="files-crumb">
+                {i > 0 && <IconRight className="files-crumb-sep" />}
+                <span
+                  className="files-crumb-link"
+                  onClick={() => c.path !== path && list(serial, c.path, true)}
+                >
+                  {c.name}
                 </span>
-              </Tooltip>
-            ),
-          },
-          {
-            title: '大小',
-            dataIndex: 'size',
-            width: 110,
-            render: (v: number, e: Entry) => (e.isDir ? '-' : fmtSize(v)),
-          },
-          {
-            title: '更新时间',
-            dataIndex: 'modTime',
-            width: 155,
-            render: (v: string) => fmtTime(v),
-          },
-          {
-            title: '操作',
-            width: 108,
-            render: (_: unknown, e: Entry) => (
-              <Space size={2}>
-                <Tooltip content="下载到本机">
-                  <Button size="mini" icon={<IconDownload />} onClick={() => doDownload(e)} />
-                </Tooltip>
-                <Tooltip content="重命名">
-                  <Button size="mini" icon={<IconEdit />} onClick={() => doRename(e)} />
-                </Tooltip>
-                <Tooltip content="删除">
-                  <Button size="mini" icon={<IconDelete />} status="danger" onClick={() => {
-                    const full = path === '/' ? `/${e.name}` : `${path}/${e.name}`
-                    Modal.confirm({
-                      title: '删除确认',
-                      content: `确定删除「${e.name}」？此操作不可恢复。`,
-                      okButtonProps: { status: 'danger' },
-                      onOk: async () => {
-                        try {
-                          await DeleteFiles(serial, [full])
-                          Message.success('已删除')
-                          list(serial, path, false)
-                        } catch (err) {
-                          Message.error(String(err))
-                        }
-                      },
-                    })
-                  }} />
-                </Tooltip>
-              </Space>
-            ),
-          },
-        ]}
-      />
-      <div className="files-status">
-        <Text type="secondary">{entries.length} 项{selected.length > 0 ? `，已选 ${selected.length} 项` : ''}</Text>
-        <Text type="secondary">{serial}[{storage}]</Text>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            {!fixedSerial && (
+              <>
+                <span ref={devBtnRef}>
+                  <Btn size="small" isDisabled={!hasOnline} onPress={() => setDevOpen(true)} aria-expanded={devOpen}>
+                    {serial ? `设备: ${serial}` : '选择设备'}
+                  </Btn>
+                </span>
+                <Float open={devOpen} onOpenChange={setDevOpen} triggerRef={devBtnRef} placement="bottom end">
+                  <div className="device-terminal-quickmenu">
+                    {online.map((d) => (
+                      <div
+                        key={d.serial}
+                        className="device-terminal-quickitem"
+                        onClick={() => {
+                          switchDevice(d.serial)
+                          setDevOpen(false)
+                        }}
+                      >
+                        {d.serial === serial ? '✓ ' : ''}{d.model || d.serial}
+                      </div>
+                    ))}
+                    {online.length === 0 && (
+                      <div className="device-terminal-quickitem muted">无在线设备</div>
+                    )}
+                  </div>
+                </Float>
+              </>
+            )}
+            {storages.length > 1 && (
+              <>
+                <span ref={storBtnRef}>
+                  <Btn size="small" onPress={() => setStorOpen(true)} aria-expanded={storOpen}>
+                    {storages.find((s) => s.id === storage)?.description || '存储'}
+                  </Btn>
+                </span>
+                <Float open={storOpen} onOpenChange={setStorOpen} triggerRef={storBtnRef} placement="bottom end">
+                  <div className="device-terminal-quickmenu">
+                    {storages.map((s) => (
+                      <div
+                        key={s.id}
+                        className="device-terminal-quickitem"
+                        onClick={() => {
+                          switchStorage(s.id)
+                          setStorOpen(false)
+                        }}
+                      >
+                        {s.id === storage ? '✓ ' : ''}{s.description}
+                      </div>
+                    ))}
+                  </div>
+                </Float>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="files-actions">
+          <div style={{ display: 'flex', gap: 4 }}>
+            <Tip tip="新建文件夹">
+              <Btn size="small" iconOnly onPress={() => doNew(true)} aria-label="新建文件夹">
+                <IconPlus />
+              </Btn>
+            </Tip>
+            <Tip tip="上传文件">
+              <Btn size="small" iconOnly isDisabled={!hasOnline} loading={uploadPct !== null} onPress={doUpload} aria-label="上传文件">
+                <IconExport />
+              </Btn>
+            </Tip>
+            <span ref={quickBtnRef}>
+              <Btn size="small" iconOnly isDisabled={!hasOnline} onPress={() => setQuickOpen(true)} aria-label="常用目录" aria-expanded={quickOpen}>
+                <IconCompass />
+              </Btn>
+            </span>
+            <Float open={quickOpen} onOpenChange={setQuickOpen} triggerRef={quickBtnRef}>
+              <div className="device-terminal-quickmenu">
+                {QUICK_DIRS.map((d) => (
+                  <div
+                    key={d}
+                    className="device-terminal-quickitem"
+                    onClick={() => {
+                      const target = storage === '/' ? `/${d}` : `${storage}/${d}`
+                      list(serial, target, true)
+                      setQuickOpen(false)
+                    }}
+                  >
+                    {d}
+                  </div>
+                ))}
+              </div>
+            </Float>
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginLeft: 16 }}>
+            <Tip tip="下载到本机">
+              <Btn
+                size="small"
+                iconOnly
+                isDisabled={selPaths.length === 0 || selPaths.length > 1}
+                onPress={() => {
+                  const e = entries.find((x) => x.name === selected[0])
+                  if (e) doDownload(e)
+                }}
+                aria-label="下载到本机"
+              >
+                <IconDownload />
+              </Btn>
+            </Tip>
+            <Tip tip="复制">
+              <Btn size="small" iconOnly isDisabled={selPaths.length === 0} onPress={() => { setClip({ op: 'copy', paths: selPaths }); Message.info(`已复制 ${selected.length} 项`) }} aria-label="复制">
+                <IconCopy />
+              </Btn>
+            </Tip>
+            <Tip tip="剪切">
+              <Btn size="small" iconOnly isDisabled={selPaths.length === 0} onPress={() => { setClip({ op: 'cut', paths: selPaths }); Message.info(`已剪切 ${selected.length} 项`) }} aria-label="剪切">
+                <IconScissor />
+              </Btn>
+            </Tip>
+            <Tip tip="删除">
+              <Btn size="small" iconOnly variant="danger" isDisabled={selPaths.length === 0} onPress={doDelete} aria-label="删除">
+                <IconDelete />
+              </Btn>
+            </Tip>
+            {clip && (
+              <Tip tip={`粘贴 ${clip.paths.length} 项`}>
+                <Btn size="small" iconOnly variant="primary" isDisabled={!hasOnline} onPress={doPaste} aria-label="粘贴">
+                  <IconPaste />
+                </Btn>
+              </Tip>
+            )}
+            <Tip tip="安装 APK 到当前设备">
+              <Btn size="small" iconOnly loading={!!installing} isDisabled={!hasOnline} onPress={doQuickInstall} aria-label="安装 APK">
+                <IconUpload />
+              </Btn>
+            </Tip>
+            <Tip tip="刷新">
+              <Btn size="small" iconOnly loading={loading} onPress={() => list(serial, path, false)} aria-label="刷新">
+                <IconRefresh />
+              </Btn>
+            </Tip>
+          </div>
+        </div>
+
+        <div className="files-table table-wrap">
+          <table className="table files-table-inner">
+            <thead>
+              <tr>
+                <th style={{ width: 34 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="全选"
+                    checked={entries.length > 0 && selected.length === entries.length}
+                    onChange={(e) => setSelected(e.target.checked ? entries.map((x) => x.name) : [])}
+                  />
+                </th>
+                <th>名称</th>
+                <th style={{ width: 110 }}>大小</th>
+                <th style={{ width: 155 }}>更新时间</th>
+                <th style={{ width: 108 }}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length === 0 && (
+                <tr>
+                  <td colSpan={5}>
+                    <div className="table-empty">
+                      {hasOnline ? (loading ? '加载中…' : '空目录') : '未检测到在线设备，请连接手机并开启 USB 调试'}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {entries.map((e) => (
+                <tr key={e.name} style={selected.includes(e.name) ? { background: 'var(--accent-weak)' } : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`选择 ${e.name}`}
+                      checked={selected.includes(e.name)}
+                      onChange={() => toggleSel(e.name)}
+                    />
+                  </td>
+                  <td>
+                    <Tip tip={e.name}>
+                      <span
+                        className={`files-name ${e.isDir ? 'files-name--dir' : ''}`}
+                        onDoubleClick={() => openEntry(e)}
+                        onClick={() => e.isDir && openEntry(e)}
+                      >
+                        {e.isDir ? <IconFolder style={{ color: '#f7b500' }} /> : <IconFile style={{ color: 'var(--ink-3)' }} />}
+                        {e.name}
+                      </span>
+                    </Tip>
+                  </td>
+                  <td>{e.isDir ? '-' : fmtSize(e.size)}</td>
+                  <td>{fmtTime(e.modTime)}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      <Tip tip="下载到本机">
+                        <Btn size="mini" iconOnly onPress={() => doDownload(e)} aria-label="下载">
+                          <IconDownload />
+                        </Btn>
+                      </Tip>
+                      <Tip tip="重命名">
+                        <Btn size="mini" iconOnly onPress={() => doRename(e)} aria-label="重命名">
+                          <IconEdit />
+                        </Btn>
+                      </Tip>
+                      <Tip tip="删除">
+                        <Btn size="mini" iconOnly variant="danger" onPress={() => confirmDeleteOne(e)} aria-label="删除">
+                          <IconDelete />
+                        </Btn>
+                      </Tip>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="files-status">
+          <span className="muted-2">{entries.length} 项{selected.length > 0 ? `，已选 ${selected.length} 项` : ''}</span>
+          <span className="muted-2">{serial}[{storage}]</span>
+        </div>
       </div>
 
       {/* 新建/重命名弹窗 */}
-      <Modal
-        title={editing?.title}
-        visible={!!editing}
-        autoFocus
-        focusLock
-        onOk={() => {
-          if (!editing) return
-          const v = editing.value
-          if (!v.trim()) { Message.warning('名称不能为空'); return }
-          editing.ok(v)
-          setEditing(null)
-        }}
-        onCancel={() => setEditing(null)}
-      >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Typography.Text>{editing?.label}</Typography.Text>
-          <Input value={editing?.value} onChange={(v) => setEditing((s) => (s ? { ...s, value: v } : s))} />
-        </Space>
-      </Modal>
+      <ModalHost modal={editingModal} onClose={() => setEditing(null)} />
 
       {/* APK 安装进度弹窗 */}
-      <Modal title="安装 APK" visible={!!installing} footer={null} closable={installing?.stage === 'done' || installing?.stage === 'error'} maskClosable={false} onCancel={() => setInstalling(null)}>
-        {installing && (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Typography.Text>
-              {installing.stage === 'pushing' && '正在推送 APK 到设备…'}
-              {installing.stage === 'installing' && '设备正在安装，请勿断开连接…'}
-              {installing.stage === 'done' && '安装成功'}
-              {installing.stage === 'error' && `安装失败：${installing.message || '未知错误'}`}
-            </Typography.Text>
-            {installing.stage !== 'error' && (
-              <Progress percent={installing.percent < 0 ? 0 : installing.percent} status={installing.stage === 'done' ? 'success' : 'normal'} />
-            )}
-            {installing.percent < 0 && installing.stage !== 'done' && (
-              <Text type="secondary">进度未知，取决于文件大小与设备速度</Text>
-            )}
-          </Space>
-        )}
-      </Modal>
+      <ModalHost
+        modal={
+          installing
+            ? {
+                title: '安装 APK',
+                closable: installing.stage === 'done' || installing.stage === 'error',
+                children: (
+                  <div className="selectable" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <span>
+                      {installing.stage === 'pushing' && '正在推送 APK 到设备…'}
+                      {installing.stage === 'installing' && '设备正在安装，请勿断开连接…'}
+                      {installing.stage === 'done' && '安装成功'}
+                      {installing.stage === 'error' && `安装失败：${installing.message || '未知错误'}`}
+                    </span>
+                    {installing.stage !== 'error' && (
+                      <div className={`progress ${installing.stage === 'done' ? 'progress--success' : ''}`}>
+                        <div
+                          className="progress-inner"
+                          style={{ width: `${installing.percent < 0 ? 0 : installing.percent}%` }}
+                        />
+                      </div>
+                    )}
+                    {installing.percent < 0 && installing.stage !== 'done' && (
+                      <span className="muted">进度未知，取决于文件大小与设备速度</span>
+                    )}
+                  </div>
+                ),
+              }
+            : null
+        }
+        onClose={() => setInstalling(null)}
+      />
+
+      {/* 普通确认弹窗（删除等） */}
+      <ModalHost modal={modal} onClose={() => setModal(null)} />
 
       {/* 上传进度条 */}
       {uploadPct !== null && uploadPct >= 0 && uploadPct < 100 && (
         <div className="files-upload-bar">
-          <Text type="secondary">上传中…</Text>
-          <Progress style={{ width: 220 }} percent={uploadPct} size="small" />
+          <span className="muted">上传中…</span>
+          <progress value={uploadPct} max={100} />
         </div>
       )}
-    </Card>
+    </div>
   )
 }
 

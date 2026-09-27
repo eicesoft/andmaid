@@ -31,12 +31,13 @@ const WindowControls: React.FC = () => {
       </button>
       <button className="win-btn" title={maximized ? '还原' : '最大化'} onClick={onToggleMaximize}>
         {maximized ? (
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M2.5 2.5 V0.5 H9.5 V7.5 H7.5 M0.5 2.5 H7.5 V9.5 H0.5 Z" fill="none" stroke="currentColor" strokeWidth="1" />
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+            <rect x="0.5" y="2.5" width="7" height="7" />
+            <path d="M2.5 2.5 V0.5 H9.5 V7.5 H7.5" />
           </svg>
         ) : (
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" />
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor">
+            <rect x="0.5" y="0.5" width="9" height="9" />
           </svg>
         )}
       </button>

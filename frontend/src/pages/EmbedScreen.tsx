@@ -1,19 +1,4 @@
 import React from 'react'
-import { Button, Message, Spin } from '@arco-design/web-react'
-import {
-  IconArrowLeft,
-  IconHome,
-  IconApps,
-  IconUp,
-  IconDown,
-  IconCamera,
-  IconNotification,
-  IconPoweroff,
-  IconClose,
-  IconRefresh,
-  IconPushpin,
-  IconMinus,
-} from '@arco-design/web-react/icon'
 import {
   CloseEmbed,
   EmbedBack,
@@ -33,6 +18,23 @@ import {
 } from '../../wailsjs/go/main/App'
 import { EventsOn, Quit, WindowMinimise, WindowSetAlwaysOnTop } from '../../wailsjs/runtime'
 import { dragStyle, noDragStyle } from '../draggable'
+import { Btn, Tip } from '../components/ui'
+import { Spinner } from '../components/icons'
+import {
+  IconArrowLeft,
+  IconApps,
+  IconCamera,
+  IconClose,
+  IconDown,
+  IconHome,
+  IconMinus,
+  IconNotification,
+  IconPoweroff,
+  IconPushpin,
+  IconRefresh,
+  IconUp,
+} from '../components/icons'
+import { Message } from '../components/Toast'
 
 const TOOLBAR_W = 52
 
@@ -207,50 +209,32 @@ const EmbedScreenPage: React.FC<Props> = ({ serial }) => {
   ]
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        background: '#1d1d1d',
-        overflow: 'hidden',
-        position: 'relative',
-      }}
-    >
+    <div className="embed-root" style={{ ...dragStyle }}>
       {/* 画面区：Windows 上 SetParent 后 scrcpy 原生子窗口盖在此区域上；
           macOS/Linux 上显示提示（投屏在独立窗口） */}
-      <div
-        ref={areaRef}
-        style={{ flex: 1, position: 'relative', background: '#141414' }}
-      >
+      <div ref={areaRef} className="embed-area">
         {!running && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 12,
-              color: '#c9c9c9',
-            }}
-          >
-            {starting && <Spin size={32} tip="正在启动投屏…" />}
+          <div className="embed-placeholder">
+            {starting && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <Spinner size={32} />
+                <span>正在启动投屏…</span>
+              </div>
+            )}
             {!starting && error && (
               <>
-                <div style={{ color: '#f7ba1e' }}>启动失败</div>
-                <div style={{ fontSize: 12, color: '#86909c', maxWidth: 420, wordBreak: 'break-all' }}>
-                  {error}
-                </div>
-                <Button size="small" icon={<IconRefresh />} onClick={restart}>
+                <div className="embed-placeholder-error">启动失败</div>
+                <div className="embed-placeholder-detail">{error}</div>
+                <Btn size="small" onPress={restart}>
+                  <IconRefresh />
                   重试
-                </Button>
+                </Btn>
               </>
             )}
             {!starting && !error && !nativeEmbed && (
               <>
                 <div style={{ fontSize: 14 }}>投屏窗口已打开</div>
-                <div style={{ fontSize: 12, color: '#86909c', maxWidth: 360, textAlign: 'center', lineHeight: 1.8 }}>
+                <div className="embed-placeholder-detail" style={{ maxWidth: 360 }}>
                   macOS 不支持把投屏嵌入本窗口，画面显示在独立投屏窗口中。
                   可用右侧工具栏控制设备，关闭工具栏不会关闭投屏。
                 </div>
@@ -261,41 +245,17 @@ const EmbedScreenPage: React.FC<Props> = ({ serial }) => {
       </div>
 
       {/* 右侧竖向工具栏：空白/分隔/把手可拖窗，仅 icon 按钮不拖 */}
-      <div
-        style={{
-          width: TOOLBAR_W,
-          background: '#F8F7F5',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '6px 0',
-          gap: 2,
-          borderLeft: '1px solid #EEEDEC',
-          cursor: 'default',
-          ...dragStyle,
-        }}
-      >
+      <div className="embed-toolbar" style={{ ...dragStyle }}>
         {/* 顶部窗口控制：关闭、置顶、最小化 */}
-        <div
-          style={{
-            width: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            paddingTop: 4,
-          }}
-        >
+        <div className="embed-toolbar-top">
           <div style={noDragStyle}>
             <div
               onMouseEnter={() => setTipText('停止并关闭')}
               onMouseLeave={() => setTipText('')}
             >
-              <Button
-                size="small"
-                icon={<IconClose />}
-                style={{ color: '#4E5BA6', fontSize: 20 }}
-                onClick={() => stop()}
-              />
+              <button type="button" className="embed-tool-btn" onClick={() => stop()} aria-label="停止并关闭">
+                <IconClose />
+              </button>
             </div>
           </div>
           <div style={noDragStyle}>
@@ -303,12 +263,9 @@ const EmbedScreenPage: React.FC<Props> = ({ serial }) => {
               onMouseEnter={() => setTipText('最小化')}
               onMouseLeave={() => setTipText('')}
             >
-              <Button
-                size="small"
-                icon={<IconMinus />}
-                style={{ color: '#4E5BA6', fontSize: 20 }}
-                onClick={() => WindowMinimise()}
-              />
+              <button type="button" className="embed-tool-btn" onClick={() => WindowMinimise()} aria-label="最小化">
+                <IconMinus />
+              </button>
             </div>
           </div>
           <div style={noDragStyle}>
@@ -316,59 +273,46 @@ const EmbedScreenPage: React.FC<Props> = ({ serial }) => {
               onMouseEnter={() => setTipText(alwaysOnTop ? '取消置顶' : '窗口置顶')}
               onMouseLeave={() => setTipText('')}
             >
-              <Button
-                size="small"
-                icon={<IconPushpin />}
-                className={alwaysOnTop ? 'embed-top-active' : ''}
-                style={{ color: '#4E5BA6', fontSize: 20 }}
+              <button
+                type="button"
+                className={`embed-tool-btn ${alwaysOnTop ? 'is-active' : ''}`}
                 onClick={() => {
                   const next = !alwaysOnTop
                   setAlwaysOnTop(next)
                   WindowSetAlwaysOnTop(next)
                 }}
-              />
+                aria-label="窗口置顶"
+              >
+                <IconPushpin />
+              </button>
             </div>
           </div>
         </div>
-        <div style={{ width: 24, height: 1, background: '#d8d6d2', margin: '2px 0 6px' }} />
+        <div className="embed-sep embed-sep--first" />
         {tools.map((t, i) => (
           <React.Fragment key={t.key}>
-            {(i === 3 || i === 5 || i === 7) && (
-              <div style={{ width: 20, height: 1, background: '#d8d6d2', margin: '4px 0' }} />
-            )}
+            {(i === 3 || i === 5 || i === 7) && <div className="embed-sep" />}
             <div style={noDragStyle}>
               <div
                 onMouseEnter={() => setTipText(t.title)}
                 onMouseLeave={() => setTipText('')}
               >
-                <Button
-                  size="small"
-                  icon={t.icon}
-                  style={{ color: running ? '#4E5BA6' : '#8c8a86', fontSize: 20 }}
+                <button
+                  type="button"
+                  className="embed-tool-btn"
                   disabled={!running && !t.always}
                   onClick={t.onClick}
-                />
+                  aria-label={t.title}
+                >
+                  {t.icon}
+                </button>
               </div>
             </div>
           </React.Fragment>
         ))}
         {/* hover 提示固定在栏底：原生投屏窗口永远盖住 webview 浮层 tooltip，改为栏内文字提示 */}
-        <div style={{ flex: 1 }} />
-        <div
-          style={{
-            height: 18,
-            fontSize: 11,
-            lineHeight: '18px',
-            color: '#8c8a86',
-            textAlign: 'center',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            width: '100%',
-            margin: '2px 0 4px',
-          }}
-        >
-          {tipText}
-        </div>
+        <div className="embed-spacer" />
+        <div className="embed-tip">{tipText}</div>
       </div>
     </div>
   )

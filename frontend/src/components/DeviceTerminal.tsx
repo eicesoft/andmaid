@@ -1,11 +1,12 @@
 import React from 'react'
-import { Button, Dropdown, Space, Tooltip } from '@arco-design/web-react'
-import { IconStop, IconThunderbolt } from '@arco-design/web-react/icon'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { EventsOn } from '../../wailsjs/runtime'
 import { StartShell, StopShell, StopShellSession, WriteShell } from '../../wailsjs/go/main/App'
+import { Btn, Float, Tip } from './ui'
+import { IconStop, IconThunderbolt } from './icons'
+import { noDragStyle } from '../draggable'
 
 // 常用快捷命令（整段写入设备 shell，回车执行）
 const QUICK_COMMANDS: { label: string; cmd: string }[] = [
@@ -189,53 +190,48 @@ const DeviceTerminal: React.FC<Props> = ({ serial }) => {
     setRunning(false)
   }
 
+  const [quickOpen, setQuickOpen] = React.useState(false)
+  const quickBtnRef = React.useRef<HTMLSpanElement>(null)
+
   return (
     <div className="device-terminal">
       <div className="device-terminal-toolbar">
-        <Dropdown
-          trigger="click"
-          position="bl"
-          droplist={
-            <div className="device-terminal-quickmenu">
-              {QUICK_COMMANDS.map((q) => (
-                <div
-                  key={q.label}
-                  className="device-terminal-quickitem"
-                  onClick={() => runQuick(q.cmd)}
-                >
-                  {q.label}
-                </div>
-              ))}
-            </div>
-          }
-        >
-          <Button size="mini" icon={<IconThunderbolt />}>
+        <span ref={quickBtnRef} style={noDragStyle}>
+          <Btn size="small" onPress={() => setQuickOpen(true)} aria-expanded={quickOpen}>
+            <IconThunderbolt />
             快捷命令
-          </Button>
-        </Dropdown>
-        <Space size={8}>
-          <span className={`device-state device-state--${running ? 'online' : 'offline'}`}>
-            <span className="device-state-dot" />
-            {running ? '已连接' : '未连接'}
-          </span>
-        </Space>
-        <div style={{ marginLeft: 'auto' }}>
-          <Space size={8}>
-            <Tooltip content="重启 shell">
-              <Button size="mini" onClick={restart} loading={booting}>
-                重启
-              </Button>
-            </Tooltip>
-            <Button
-              size="mini"
-              status="warning"
-              icon={<IconStop />}
-              disabled={!running}
-              onClick={stop}
-            >
-              断开
-            </Button>
-          </Space>
+          </Btn>
+        </span>
+        <Float open={quickOpen} onOpenChange={setQuickOpen} triggerRef={quickBtnRef}>
+          <div className="device-terminal-quickmenu">
+            {QUICK_COMMANDS.map((q) => (
+              <div
+                key={q.label}
+                className="device-terminal-quickitem"
+                onClick={() => {
+                  runQuick(q.cmd)
+                  setQuickOpen(false)
+                }}
+              >
+                {q.label}
+              </div>
+            ))}
+          </div>
+        </Float>
+        <span className={`state-pill state-pill--${running ? 'online' : 'offline'}`}>
+          <span className="state-pill-dot" />
+          {running ? '已连接' : '未连接'}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Tip tip="重启 shell">
+            <Btn size="small" loading={booting} onPress={restart} aria-label="重启 shell">
+              重启
+            </Btn>
+          </Tip>
+          <Btn size="small" isDisabled={!running} onPress={stop}>
+            <IconStop />
+            断开
+          </Btn>
         </div>
       </div>
       <div className="device-terminal-host" ref={hostRef} />

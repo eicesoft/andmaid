@@ -1,11 +1,10 @@
 import React from 'react'
-import { Button, Card, Message, Typography } from '@arco-design/web-react'
-import { IconRefresh } from '@arco-design/web-react/icon'
 import { AdbStatus, RestartAdbServer } from '../../wailsjs/go/main/App'
 import type { adb as adbNS } from '../../wailsjs/go/models'
 import PageHeader from '../components/PageHeader'
-
-const { Text } = Typography
+import { Btn } from '../components/ui'
+import { IconRefresh } from '../components/icons'
+import { Message } from '../components/Toast'
 
 const HomePage: React.FC = () => {
   const [adb, setAdb] = React.useState<adbNS.Status | null>(null)
@@ -50,15 +49,11 @@ const HomePage: React.FC = () => {
   const stateLabel = adb === null ? '检测中…' : adb.running ? '运行中' : '未运行'
 
   return (
-    <Card>
-      <PageHeader
-        title={
-          <Typography.Text>欢迎使用 Andmaid</Typography.Text>
-        }
-      />
+    <div className="page-card">
+      <PageHeader title="欢迎使用 Andmaid" />
       <div className="adb-status-bar" data-state={statePill} style={{ marginTop: 16 }}>
         {adb === null ? (
-          <Text type="secondary">正在检测 adb server 状态…</Text>
+          <span className="muted">正在检测 adb server 状态…</span>
         ) : adb.running ? (
           <>
             <span className="adb-status-item">
@@ -68,9 +63,7 @@ const HomePage: React.FC = () => {
             <span className="adb-status-divider" />
             <span className="adb-status-item">
               <span className="adb-status-label">已连接设备</span>
-              <span className="adb-status-value">
-                {adb.devices} 台
-              </span>
+              <span className="adb-status-value">{adb.devices} 台</span>
             </span>
           </>
         ) : (
@@ -79,20 +72,16 @@ const HomePage: React.FC = () => {
           </span>
         )}
         <span className="adb-status-spacer" />
-        <span className={`device-state device-state--${statePill}`}>
-          <span className="device-state-dot" />
+        <span className={`state-pill state-pill--${statePill}`}>
+          <span className="state-pill-dot" />
           {stateLabel}
         </span>
-        <Button
-          size="mini"
-          icon={<IconRefresh />}
-          loading={adbLoading || restarting}
-          onClick={restartAdb}
-        >
+        <Btn size="mini" loading={adbLoading || restarting} onPress={restartAdb}>
+          <IconRefresh />
           重启
-        </Button>
+        </Btn>
       </div>
-    </Card>
+    </div>
   )
 }
 

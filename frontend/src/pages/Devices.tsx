@@ -1,28 +1,19 @@
 import React from 'react'
+import PageHeader from '../components/PageHeader'
+import DeviceTerminal from '../components/DeviceTerminal'
+import FilesPage from './Files'
+import { Btn, Drawer, Float, ModalHost, TextInput, Tip } from '../components/ui'
 import {
-  Button,
-  Card,
-  Drawer,
-  Dropdown,
-  Input,
-  Message,
-  Space,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-} from '@arco-design/web-react'
-
-import {
-  IconDesktop,
-  IconRefresh,
-  IconCloseCircle,
-  IconExpand,
-  IconLaunch,
-  IconSearch,
   IconCode,
+  IconCloseCircle,
+  IconDesktop,
+  IconExpand,
   IconFolder,
-} from '@arco-design/web-react/icon'
+  IconLaunch,
+  IconRefresh,
+  IconSearch,
+} from '../components/icons'
+import { Message } from '../components/Toast'
 import {
   CloseScreen,
   EmbedNative,
@@ -35,11 +26,6 @@ import {
   ScreenStatus,
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime'
-import PageHeader from '../components/PageHeader'
-import DeviceTerminal from '../components/DeviceTerminal'
-import FilesPage from './Files'
-
-const { Text } = Typography
 
 interface Device {
   serial: string
@@ -75,6 +61,10 @@ const DevicePage: React.FC = () => {
   const [openingApp, setOpeningApp] = React.useState('')
   const [terminalSerial, setTerminalSerial] = React.useState('')
   const [filesSerial, setFilesSerial] = React.useState('')
+  const [confirmDel, setConfirmDel] = React.useState<{ title: string; children: string; onOk: () => void } | null>(null)
+
+  // 「启动应用」弹层的锚点按钮：按行渲染多个，用 Map 管理
+  const launchBtnRefs = React.useRef<Map<string, HTMLSpanElement>>(new Map())
 
   React.useEffect(() => {
     EmbedNative().then((v) => setEmbedNative(!!v)).catch(() => {})
@@ -199,6 +189,20 @@ const DevicePage: React.FC = () => {
     }
   }
 
+  const fetchApps = React.useCallback(async (serial: string) => {
+    setAppsLoading(true)
+    setAppsError('')
+    try {
+      const list = await ListApps(serial)
+      setApps(list || [])
+      if (list && list.length > 0) writeAppsCache(serial, list)
+    } catch (e) {
+      setAppsError(String(e))
+    } finally {
+      setAppsLoading(false)
+    }
+  }, [])
+
   const openAppMenu = async (serial: string) => {
     setAppMenu({ serial, visible: true })
     const cached = readAppsCache(serial)
@@ -210,32 +214,8 @@ const DevicePage: React.FC = () => {
       return
     }
     setApps([])
-    setAppsError('')
     setAppKeyword('')
-    setAppsLoading(true)
-    try {
-      const list = await ListApps(serial)
-      setApps(list || [])
-      if (list && list.length > 0) writeAppsCache(serial, list)
-    } catch (e) {
-      setAppsError(String(e))
-    } finally {
-      setAppsLoading(false)
-    }
-  }
-
-  const reloadApps = async (serial: string) => {
-    setAppsLoading(true)
-    setAppsError('')
-    try {
-      const list = await ListApps(serial)
-      setApps(list || [])
-      if (list && list.length > 0) writeAppsCache(serial, list)
-    } catch (e) {
-      setAppsError(String(e))
-    } finally {
-      setAppsLoading(false)
-    }
+    fetchApps(serial)
   }
 
   const launchApp = async (serial: string, app: AndroidApp) => {
@@ -263,238 +243,273 @@ const DevicePage: React.FC = () => {
         Number(a.system) - Number(b.system) || a.name.localeCompare(b.name, 'zh-Hans-CN'),
     )
 
+  const askCloseAll = (record: Device) => {
+    const sids = Object.keys(screens).filter((id) => id.startsWith(record.serial + '#'))
+    if (sids.length > 0) {
+      setConfirmDel({
+        title: '关闭投屏',
+        children: `关闭 ${record.serial} 的 ${sids.length} 个投屏会话？`,
+        onOk: () => {
+          sids.forEach((id) => closeScreen(id))
+          setConfirmDel(null)
+        },
+      })
+    } else {
+      Message.info('内嵌投屏请在投屏窗口内停止')
+    }
+  }
+
   return (
-    <Card>
+    <div className="page-card">
       <PageHeader
         title={
-          <Space size={8}>
+          <>
             设备管理
-            <Typography.Text type="secondary">
-              共 {devices.length} 台设备
-            </Typography.Text>
-            <Button
-              icon={<IconRefresh />}
+            <span className="muted">共 {devices.length} 台设备</span>
+            <Btn
+              iconOnly
               loading={loading}
-              onClick={refresh}
-            />
-          </Space>
+              onPress={refresh}
+              aria-label="刷新设备列表"
+            >
+              <IconRefresh />
+            </Btn>
+          </>
         }
       />
-      <Table
-        className="device-table"
-        size="small"
-        border={{ wrapper: true, cell: false }}
-        style={{ marginTop: 12 }}
-        loading={loading}
-        data={devices}
-        pagination={false}
-        rowKey="serial"
-        noDataElement={<Text type="secondary">未检测到设备，请连接手机并开启 USB 调试</Text>}
-        columns={[
-          {
-            title: '名称',
-            dataIndex: 'serial',
-            width: 280,
-            render: (_: unknown, record: Device) => (
-              <div className="device-name-cell">
-                <span className="device-name">{record.serial}</span>
-                {record.model && (
-                  <span className="device-model">{record.model}</span>
-                )}
-              </div>
-            ),          },
-          {
-            title: '状态',
-            dataIndex: 'state',
-            width: 90,
-            render: (v: string) => (
-              <span className={`device-state device-state--${stateClass[v] || 'unknown'}`}>
-                <span className="device-state-dot" />
-                {v === 'device' ? '在线' : v === 'offline' ? '离线' : v === 'unauthorized' ? '未授权' : v}
-              </span>
-            ),
-          },
-          {
-            title: '投屏',
-            width: 160,
-            render: (_: unknown, record: Device) => {
+      <div className="table-wrap" style={{ marginTop: 12 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 280 }}>名称</th>
+              <th style={{ width: 90 }}>状态</th>
+              <th style={{ width: 160 }}>投屏</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.length === 0 && (
+              <tr>
+                <td colSpan={4}>
+                  <div className="table-empty">未检测到设备，请连接手机并开启 USB 调试</div>
+                </td>
+              </tr>
+            )}
+            {devices.map((record) => {
               const sessions = Object.keys(screens).filter((id) => id.startsWith(record.serial + '#'))
-              const items: React.ReactNode[] = []
-              if (embeds[record.serial]) {
-                items.push(<span key="embed" className="device-cast device-cast--embed">内嵌中</span>)
-              }
-              if (sessions.length === 0 && items.length === 0) {
-                return <span className="device-cast device-cast--none">未启动</span>
-              }
-              for (const id of sessions) {
-                items.push(
-                  <span
-                    key={id}
-                    className="device-cast device-cast--live"
-                    role="button"
-                    tabIndex={0}
-                    title="点击关闭该投屏"
-                    onClick={() => closeScreen(id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') closeScreen(id)
-                    }}
-                  >
-                    {id.split('#')[1] === '0' ? record.serial : `#${id.split('#')[1]}`}
-                  </span>,
-                )
-              }
-              return <Space size={4} wrap>{items}</Space>
-            },
-          },
-          {
-            title: '操作',
-            render: (_: unknown, record: Device) => (
-              <Space>
-                <Tooltip content="窗口投屏">
-                  <Button
-                    size="small"
-                    icon={<IconDesktop />}
-                    disabled={record.state !== 'device'}
-                    loading={opening === record.serial}
-                    onClick={() => openScreen(record.serial)}
-                  />
-                </Tooltip>
-                <Tooltip content={embedNative ? '内嵌投屏' : '投屏 + 控制工具栏（macOS 不支持嵌入）'}>
-                  <Button
-                    size="small"
-                    icon={<IconExpand />}
-                    disabled={record.state !== 'device'}
-                    loading={openingEmbed === record.serial}
-                    onClick={() => openEmbed(record.serial)}
-                  />
-                </Tooltip>
-                <Tooltip content="终端">
-                  <Button
-                    size="small"
-                    icon={<IconCode />}
-                    disabled={record.state !== 'device'}
-                    onClick={() => setTerminalSerial(record.serial)}
-                  />
-                </Tooltip>
-                <Tooltip content="文件管理">
-                  <Button
-                    size="small"
-                    icon={<IconFolder />}
-                    disabled={record.state !== 'device'}
-                    onClick={() => setFilesSerial(record.serial)}
-                  />
-                </Tooltip>
-                <Dropdown
-                  trigger="click"
-                  position="br"
-                  popupVisible={appMenu.visible && appMenu.serial === record.serial}
-                  onVisibleChange={(v) => {
-                    if (v && appMenu.serial !== record.serial) openAppMenu(record.serial)
-                    else if (!v) setAppMenu({ serial: '', visible: false })
-                  }}
-                  droplist={
-                    <div className="app-picker">
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <Input
+              const hasCast = sessions.length > 0 || embeds[record.serial]
+              return (
+                <tr key={record.serial}>
+                  <td>
+                    <div className="device-name-cell">
+                      <span className="device-name">{record.serial}</span>
+                      {record.model && <span className="device-model">{record.model}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`state-pill state-pill--${stateClass[record.state] || 'unknown'}`}>
+                      <span className="state-pill-dot" />
+                      {record.state === 'device' ? '在线' : record.state === 'offline' ? '离线' : record.state === 'unauthorized' ? '未授权' : record.state}
+                    </span>
+                  </td>
+                  <td>
+                    {embeds[record.serial] && <span className="device-cast device-cast--embed">内嵌中</span>}
+                    {!embeds[record.serial] && sessions.length === 0 && (
+                      <span className="device-cast device-cast--none">未启动</span>
+                    )}
+                    {sessions.map((id) => (
+                      <span
+                        key={id}
+                        className="device-cast device-cast--live"
+                        role="button"
+                        tabIndex={0}
+                        title="点击关闭该投屏"
+                        onClick={() => closeScreen(id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') closeScreen(id)
+                        }}
+                      >
+                        {id.split('#')[1] === '0' ? record.serial : `#${id.split('#')[1]}`}
+                      </span>
+                    ))}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <Tip tip="窗口投屏">
+                        <Btn
                           size="small"
-                          allowClear
-                          prefix={<IconSearch />}
-                          placeholder="搜索应用名称或包名"
-                          value={appKeyword}
-                          onChange={setAppKeyword}
-                          style={{ flex: 1, width: 'auto' }}
-                        />
-                        <Button
+                          iconOnly
+                          isDisabled={record.state !== 'device'}
+                          loading={opening === record.serial}
+                          onPress={() => openScreen(record.serial)}
+                          aria-label="窗口投屏"
+                        >
+                          <IconDesktop />
+                        </Btn>
+                      </Tip>
+                      <Tip tip={embedNative ? '内嵌投屏' : '投屏 + 控制工具栏（macOS 不支持嵌入）'}>
+                        <Btn
                           size="small"
-                          icon={<IconRefresh />}
-                          loading={appsLoading}
-                          onClick={() => reloadApps(record.serial)}
-                        />
-                      </div>
-                      {appsLoading && (
-                        <div className="app-picker-status">正在读取应用列表…</div>
-                      )}
-                      {!appsLoading && appsError && (
-                        <div className="app-picker-status app-picker-error">{appsError}</div>
-                      )}
-                      {!appsLoading && !appsError && filteredApps.length === 0 && (
-                        <div className="app-picker-status">无匹配应用</div>
-                      )}
-                      {!appsLoading && !appsError && filteredApps.length > 0 && (
-                        <div className="app-picker-list">
-                          {filteredApps.map((a) => (
-                            <div
-                              key={a.package}
-                              className="app-picker-item"
-                              onClick={() => launchApp(record.serial, a)}
-                            >
-                              <div className="app-picker-item-main">
-                                {a.system && <Tag size="small" color="gray">系统</Tag>}
-                                <span className="app-picker-name">{a.name}</span>
-                              </div>
-                              <span className="app-picker-pkg" title={a.package}>{a.package}</span>
-                            </div>
-                          ))}
-                        </div>
+                          iconOnly
+                          isDisabled={record.state !== 'device'}
+                          loading={openingEmbed === record.serial}
+                          onPress={() => openEmbed(record.serial)}
+                          aria-label="内嵌投屏"
+                        >
+                          <IconExpand />
+                        </Btn>
+                      </Tip>
+                      <Tip tip="终端">
+                        <Btn
+                          size="small"
+                          iconOnly
+                          isDisabled={record.state !== 'device'}
+                          onPress={() => setTerminalSerial(record.serial)}
+                          aria-label="终端"
+                        >
+                          <IconCode />
+                        </Btn>
+                      </Tip>
+                      <Tip tip="文件管理">
+                        <Btn
+                          size="small"
+                          iconOnly
+                          isDisabled={record.state !== 'device'}
+                          onPress={() => setFilesSerial(record.serial)}
+                          aria-label="文件管理"
+                        >
+                          <IconFolder />
+                        </Btn>
+                      </Tip>
+                      <span
+                        ref={(el) => {
+                          if (el) launchBtnRefs.current.set(record.serial, el)
+                          else launchBtnRefs.current.delete(record.serial)
+                        }}
+                      >
+                        <Btn
+                          size="small"
+                          iconOnly
+                          isDisabled={record.state !== 'device'}
+                          loading={openingApp === record.serial}
+                          onPress={() => {
+                            if (appMenu.visible && appMenu.serial === record.serial) {
+                              setAppMenu({ serial: '', visible: false })
+                            } else {
+                              openAppMenu(record.serial)
+                            }
+                          }}
+                          aria-label="启动应用"
+                          aria-expanded={appMenu.visible && appMenu.serial === record.serial}
+                        >
+                          <IconLaunch />
+                        </Btn>
+                      </span>
+                      {hasCast && (
+                        <Tip tip="关闭全部投屏">
+                          <Btn
+                            size="small"
+                            iconOnly
+                            onPress={() => askCloseAll(record)}
+                            aria-label="关闭全部投屏"
+                          >
+                            <IconCloseCircle />
+                          </Btn>
+                        </Tip>
                       )}
                     </div>
-                  }
-                >
-                  <Button
-                    size="small"
-                    icon={<IconLaunch />}
-                    disabled={record.state !== 'device'}
-                    loading={openingApp === record.serial}
-                    onClick={() => openAppMenu(record.serial)}
-                  />
-                </Dropdown>
-                {(Object.keys(screens).some((id) => id.startsWith(record.serial + '#')) || embeds[record.serial]) && (
-                  <Button
-                    size="small"
-                    icon={<IconCloseCircle />}
-                    onClick={() => {
-                      const sids = Object.keys(screens).filter((id) => id.startsWith(record.serial + '#'))
-                      if (sids.length > 0) sids.forEach((id) => closeScreen(id))
-                      else Message.info('内嵌投屏请在投屏窗口内停止')
-                    }}
-                  />
-                )}
-              </Space>
-            ),
-          },
-        ]}
-      />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 启动应用选择浮层 */}
+      {devices.map((record) => (
+        <Float
+          key={record.serial}
+          open={appMenu.visible && appMenu.serial === record.serial}
+          onOpenChange={(v) => setAppMenu({ serial: v ? record.serial : '', visible: v })}
+          triggerRef={{
+            current: launchBtnRefs.current.get(record.serial) ?? null,
+          }}
+          placement="bottom end"
+        >
+          <div className="app-picker">
+            <div style={{ display: 'flex', gap: 4 }}>
+              <TextInput
+                small
+                prefix={<IconSearch />}
+                placeholder="搜索应用名称或包名"
+                value={appKeyword}
+                onChange={setAppKeyword}
+                ariaLabel="搜索应用"
+              />
+              <Btn
+                size="small"
+                iconOnly
+                loading={appsLoading}
+                onPress={() => fetchApps(record.serial)}
+                aria-label="重新读取应用列表"
+              >
+                <IconRefresh />
+              </Btn>
+            </div>
+            {appsLoading && <div className="app-picker-status">正在读取应用列表…</div>}
+            {!appsLoading && appsError && <div className="app-picker-status app-picker-error">{appsError}</div>}
+            {!appsLoading && !appsError && filteredApps.length === 0 && (
+              <div className="app-picker-status">无匹配应用</div>
+            )}
+            {!appsLoading && !appsError && filteredApps.length > 0 && (
+              <div className="app-picker-list">
+                {filteredApps.map((a) => (
+                  <div
+                    key={a.package}
+                    className="app-picker-item"
+                    onClick={() => launchApp(record.serial, a)}
+                  >
+                    <div className="app-picker-item-main">
+                      {a.system && <span className="tag tag--gray">系统</span>}
+                      <span className="app-picker-name">{a.name}</span>
+                    </div>
+                    <span className="app-picker-pkg" title={a.package}>{a.package}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Float>
+      ))}
+
       <Drawer
-        width={792}
+        open={!!terminalSerial}
+        onClose={() => setTerminalSerial('')}
         title={
-          <Space size={8}>
+          <>
             <IconCode />
             <span>终端 - {terminalSerial}</span>
-          </Space>
+          </>
         }
-        visible={!!terminalSerial}
-        onCancel={() => setTerminalSerial('')}
-        unmountOnExit
-        footer={null}
       >
         {terminalSerial && <DeviceTerminal serial={terminalSerial} />}
       </Drawer>
       <Drawer
-        width={792}
+        open={!!filesSerial}
+        onClose={() => setFilesSerial('')}
         title={
-          <Space size={8}>
+          <>
             <IconFolder />
             <span>文件管理 - {filesSerial}</span>
-          </Space>
+          </>
         }
-        visible={!!filesSerial}
-        onCancel={() => setFilesSerial('')}
-        unmountOnExit
-        footer={null}
       >
         {filesSerial && <FilesPage serial={filesSerial} />}
       </Drawer>
-    </Card>
+
+      <ModalHost modal={confirmDel} onClose={() => setConfirmDel(null)} />
+    </div>
   )
 }
 

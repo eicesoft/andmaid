@@ -22,12 +22,13 @@ import (
 // hostArea 计算画面区（宿主客户区去掉工具栏，物理像素）
 type winEmbedProcess struct {
 	EmbedProcess
-	hostHwnd  uintptr
-	childHwnd uintptr // scrcpy 窗口句柄（嵌入后 FindWindow 搜不到子窗口，必须存句柄）
-	embedded  bool
-	mutex     uintptr
-	mu        sync.Mutex
-	lastRect  []int // 最近一次适配后的 [x,y,w,h]，重挂时复用
+	hostHwnd    uintptr
+	childHwnd   uintptr // scrcpy 窗口句柄（嵌入后 FindWindow 搜不到子窗口，必须存句柄）
+	embedded    bool
+	mutex       uintptr
+	mu          sync.Mutex
+	lastRect    []int // 最近一次适配后的 [x,y,w,h]，重挂时复用
+	flashBehind bool  // 置底闪现：true 时子窗口压到 WebView 之下，让 HTML 弹层可见
 }
 
 func (p *winEmbedProcess) hostArea() (int, int, int, int) {
@@ -280,6 +281,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 	if err != nil {
 		return err
 	}
+	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
+	if err := a.ensureAdbServer(); err != nil {
+		return err
+	}
 
 	// 宿主窗口客户区（子画面区去掉右侧 icon 栏宽度，前端把画面区算好传入）
 	settings, err := LoadSettings()
@@ -385,16 +390,29 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 							if err := embedWindowTo(nh, hostHwnd); err == nil {
 								proc.childHwnd = nh
 								proc.reapplyLastRect()
+								proc.mu.Lock()
+								fb := proc.flashBehind
+								proc.mu.Unlock()
+								if fb {
+									proc.setChildBehind(true)
+								}
 							}
 							continue
 						}
 						// 句柄活着但可能被移出宿主（外部 SetParent 或 SDL 改父）
 						pp, _, _ := procGetParent.Call(proc.childHwnd)
 						if pp != hostHwnd {
-							_ = embedWindowTo(proc.childHwnd, hostHwnd)
+							if embedWindowTo(proc.childHwnd, hostHwnd) == nil {
+								proc.reapplyLastRect()
+							}
 						}
-						// 持续压在 WebView2 之上（合成层可能把子窗口埋掉）
-						procBringWindowToTop.Call(proc.childHwnd)
+						// 持续压在 WebView2 之上（合成层可能把子窗口埋掉）；置底闪现期间跳过
+						proc.mu.Lock()
+						fb := proc.flashBehind
+						proc.mu.Unlock()
+						if !fb {
+							procBringWindowToTop.Call(proc.childHwnd)
+						}
 						// 宿主客户区变化：后端直接适配（webview resize 事件可能不触发）
 						_, _, cw, ch := proc.hostArea()
 						if cw > 0 && (cw != lastW || ch != lastH) {
@@ -461,6 +479,26 @@ func (p *winEmbedProcess) reapplyLastRect() {
 	}
 }
 
+// setChildBehind 把子窗口压到 WebView2 之下（HTML 弹层可见）或恢复到其上。
+// HWND_BOTTOM=1：同父内仅沉底，不逃出宿主窗口。
+const hwndBottom = 1
+
+func (p *winEmbedProcess) setChildBehind(behind bool) {
+	if p.childHwnd == 0 {
+		return
+	}
+	p.mu.Lock()
+	p.flashBehind = behind
+	p.mu.Unlock()
+	if behind {
+		withPerMonitorDPI(func() {
+			procSetWindowPos.Call(p.childHwnd, hwndBottom, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoAct)
+		})
+	} else {
+		procBringWindowToTop.Call(p.childHwnd)
+	}
+}
+
 // ensureChild 确保子窗口句柄可用：失效时按标题重找并重挂（自愈）。
 // 返回可用句柄，失败返回 0。
 func (a *App) ensureChild(p *winEmbedProcess) uintptr {
@@ -473,6 +511,12 @@ func (a *App) ensureChild(p *winEmbedProcess) uintptr {
 		// 句柄活着但脱离宿主：重挂
 		if err := embedWindowTo(p.childHwnd, p.hostHwnd); err == nil {
 			p.reapplyLastRect()
+			p.mu.Lock()
+			fb := p.flashBehind
+			p.mu.Unlock()
+			if fb {
+				p.setChildBehind(true)
+			}
 			return p.childHwnd
 		}
 	}
@@ -488,6 +532,30 @@ func (a *App) ensureChild(p *winEmbedProcess) uintptr {
 	p.childHwnd = nh
 	p.reapplyLastRect()
 	return nh
+}
+
+// EmbedFlashBehind 截图提示用：把投屏子窗口压到 WebView 之下，让 HTML Message 可见。
+// 前端 setTimeout 后调用 EmbedFlashRestore 恢复。
+func (a *App) EmbedFlashBehind(serial string) error {
+	proc, ok := winProcs[serial]
+	if !ok {
+		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
+	}
+	if a.ensureChild(proc) == 0 {
+		return fmt.Errorf("投屏窗口不可用")
+	}
+	proc.setChildBehind(true)
+	return nil
+}
+
+// EmbedFlashRestore 恢复投屏子窗口到 WebView 之上
+func (a *App) EmbedFlashRestore(serial string) error {
+	proc, ok := winProcs[serial]
+	if !ok {
+		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
+	}
+	proc.setChildBehind(false)
+	return nil
 }
 
 // ResizeEmbed 同步子窗口位置尺寸。

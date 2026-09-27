@@ -5,12 +5,15 @@ import {
   IconHome,
   IconSettings,
   IconMobile,
+  IconRobot,
 } from '@arco-design/web-react/icon'
 import { dragStyle, noDragStyle } from './draggable'
 import WindowControls from './components/WindowControls'
 import HomePage from './pages/Home'
 import DevicePage from './pages/Devices'
+import FilesPage from './pages/Files'
 import SettingsPage from './pages/Settings'
+import AgentPage from './pages/Agent'
 import EmbedScreenPage from './pages/EmbedScreen'
 import { EmbedMode } from '../wailsjs/go/main/App'
 import './App.css'
@@ -64,6 +67,10 @@ const App: React.FC = () => {
             <IconMobile />
             设备管理
           </Menu.Item>
+          <Menu.Item key="/agent">
+            <IconRobot />
+            Agent
+          </Menu.Item>
           <Menu.Item key="/settings">
             <IconSettings />
             设置
@@ -75,6 +82,8 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/devices" element={<DevicePage />} />
+            <Route path="/files" element={<FilesPage />} />
+            <Route path="/agent" element={<AgentPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

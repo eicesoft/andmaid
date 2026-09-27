@@ -2,7 +2,6 @@ import React from 'react'
 import {
   Button,
   Card,
-  Divider,
   Input,
   InputNumber,
   Message,
@@ -14,12 +13,31 @@ import {
   Typography,
 } from '@arco-design/web-react'
 import { IconRefresh, IconSave } from '@arco-design/web-react/icon'
-import { GetSettings, ResetSettings, SaveSettings } from '../../wailsjs/go/main/App'
+import { GetAISettings, GetSettings, ListDevices, ListEncoders, ResetSettings, SaveAISettings, SaveSettings } from '../../wailsjs/go/main/App'
 import PageHeader from '../components/PageHeader'
 
 const { Text } = Typography
 
 // ---------- 类型 ----------
+interface AndroidApp {
+  name: string
+  package: string
+  system: boolean
+}
+
+interface VideoEncoder {
+  codec: string
+  name: string
+  hardware: boolean
+  alias: boolean
+}
+
+interface Device {
+  serial: string
+  state: string
+  model: string
+}
+
 interface Settings {
   // 基础
   fullscreen?: boolean
@@ -206,9 +224,7 @@ const NumRow: React.FC<{
 )
 
 const Section: React.FC<{ title: string }> = ({ title }) => (
-  <Divider orientation="left" style={{ marginTop: 8 }}>
-    {title}
-  </Divider>
+  <div className="settings-section">{title}</div>
 )
 
 // ---------- 选项常量（来源 bin/help.txt）----------
@@ -229,11 +245,83 @@ const VERBOSITY = ['verbose', 'debug', 'info', 'warn', 'error']
 const IME_POLICIES = ['local', 'fallback', 'hide']
 const SHORTCUT_MOD_OPTIONS = ['lctrl', 'rctrl', 'lalt', 'ralt', 'lsuper', 'rsuper']
 
+// ---------- AI 设置 ----------
+
+interface AISettings {
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  temperature?: number | null
+  systemPrompt?: string
+}
+
+const AISettingsPane: React.FC<{
+  ai: AISettings
+  setAI: React.Dispatch<React.SetStateAction<AISettings>>
+}> = ({ ai, setAI }) => {
+  const set = (k: keyof AISettings, v: any) => setAI((prev) => ({ ...prev, [k]: v }))
+
+  return (
+    <div>
+      <Section title="接口" />
+      <TextRow
+        label="接口地址"
+        hint="OpenAI 兼容接口 BaseURL，留空用官方 https://api.openai.com/v1；中转/本地模型填对应地址，如 https://api.deepseek.com/v1"
+        placeholder="https://api.openai.com/v1"
+        value={ai.baseUrl}
+        onChange={(v) => set('baseUrl', v)}
+      />
+      <TextRow
+        label="API Key"
+        hint="接口鉴权密钥，仅保存在本机配置文件"
+        placeholder="sk-..."
+        value={ai.apiKey}
+        onChange={(v) => set('apiKey', v)}
+      />
+      <TextRow
+        label="模型"
+        hint="模型名，如 gpt-4o-mini、deepseek-chat"
+        placeholder="gpt-4o-mini"
+        value={ai.model}
+        onChange={(v) => set('model', v)}
+      />
+      <Row label="温度" hint="采样温度 0~2，越小越确定；留空用接口默认">
+        <InputNumber
+          value={ai.temperature ?? undefined}
+          min={0}
+          max={2}
+          step={0.1}
+          placeholder="默认"
+          style={{ width: '100%' }}
+          onChange={(v) => set('temperature', v ?? null)}
+        />
+      </Row>
+      <Section title="Agent 行为" />
+      <Row label="附加提示词" hint="拼接到 Agent 系统提示末尾，约束回答风格或补充设备使用背景">
+        <Input.TextArea
+          value={ai.systemPrompt ?? ''}
+          placeholder="如：这是一台测试机，回答尽量简短"
+          autoSize={{ minRows: 3, maxRows: 8 }}
+          onChange={(v) => set('systemPrompt', v)}
+        />
+      </Row>
+    </div>
+  )
+}
+
 // ---------- 页面 ----------
 const SettingsPage: React.FC = () => {
   const [s, setS] = React.useState<Settings>({})
+  const [ai, setAI] = React.useState<AISettings>({})
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+
+  // 视频编码器：从设备实读（scrcpy --list-encoders）
+  const [devices, setDevices] = React.useState<Device[]>([])
+  const [encoderSerial, setEncoderSerial] = React.useState('')
+  const [encoders, setEncoders] = React.useState<VideoEncoder[]>([])
+  const [encodersLoading, setEncodersLoading] = React.useState(false)
+  const [encodersError, setEncodersError] = React.useState('')
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -245,11 +333,59 @@ const SettingsPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
+    try {
+      const a = await GetAISettings()
+      setAI((a as AISettings) ?? {})
+    } catch (e: any) {
+      Message.error(`读取 AI 设置失败: ${e?.message ?? e}`)
+    }
   }, [])
 
   React.useEffect(() => {
     load()
   }, [load])
+
+  // 打开设置页即刷新设备列表，供编码器读取选择目标设备
+  const refreshDevices = React.useCallback(async () => {
+    try {
+      const list = (await ListDevices()) as Device[]
+      const online = (list ?? []).filter((d) => d.state === 'device')
+      setDevices(online)
+      setEncoderSerial((cur) => (online.some((d) => d.serial === cur) ? cur : online[0]?.serial ?? ''))
+    } catch {
+      setDevices([])
+    }
+  }, [])
+
+  React.useEffect(() => {
+    refreshDevices()
+  }, [refreshDevices])
+
+  // 按当前编码参数读取设备实际可用的视频编码器
+  const fetchEncoders = React.useCallback(async (serial: string, codec?: string) => {
+    if (!serial) return
+    setEncodersLoading(true)
+    setEncodersError('')
+    try {
+      const list = (await ListEncoders(serial, codec ?? '')) as VideoEncoder[]
+      setEncoders(list ?? [])
+    } catch (e: any) {
+      setEncoders([])
+      setEncodersError(`${e?.message ?? e}`)
+    } finally {
+      setEncodersLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (encoderSerial) {
+      fetchEncoders(encoderSerial, s.videoCodec)
+    } else {
+      setEncoders([])
+      setEncodersError('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encoderSerial, s.videoCodec])
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setS((prev) => ({ ...prev, [k]: v }))
@@ -258,6 +394,7 @@ const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       await SaveSettings(s as any)
+      await SaveAISettings(ai as any)
       Message.success('设置已保存')
     } catch (e: any) {
       Message.error(`保存失败: ${e?.message ?? e}`)
@@ -324,7 +461,44 @@ const SettingsPage: React.FC = () => {
           <NumRow label="最大尺寸" hint="-m, --max-size：限制宽高，0 为不限" min={0} value={s.maxSize ?? null} onChange={num('maxSize')} />
           <NumRow label="最大帧率" hint="--max-fps，Android 10+ 官方支持" min={1} max={120} value={s.maxFps ?? null} onChange={num('maxFps')} />
           <SelectRow label="视频编码" hint="--video-codec" options={VIDEO_CODECS} value={s.videoCodec} onChange={sel('videoCodec')} />
-          <TextRow label="视频编码器" hint="--video-encoder，具体 MediaCodec 编码器名（--list-encoders 可列出）" placeholder="默认" value={s.videoEncoder} onChange={tx('videoEncoder')} />
+          <Row label="视频编码器" hint="--video-encoder，从设备实读可用编码器（随「视频编码」变化），也可手动输入">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Select
+                value={s.videoEncoder || undefined}
+                placeholder="默认"
+                allowClear
+                allowCreate
+                showSearch
+                loading={encodersLoading}
+                style={{ flex: 3, minWidth: 120 }}
+                onChange={(v) => set('videoEncoder', v)}
+                notFoundContent={encodersError ? encodersError : '无设备连接，可手动输入'}
+              >
+                {encoders.map((e) => (
+                  <Select.Option key={e.name} value={e.name} disabled={e.alias}>
+                    {e.name}
+                    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                      {e.hardware ? '硬件' : '软件'}
+                      {e.alias ? '（别名）' : ''}
+                    </Text>
+                  </Select.Option>
+                ))}
+              </Select>
+              <Select
+                value={encoderSerial || undefined}
+                placeholder="设备"
+                style={{ flex: 1, flexShrink: 1, width: 150, maxWidth: 180, minWidth: 0 }}
+                onChange={(v) => setEncoderSerial(v)}
+              >
+                {devices.map((d) => (
+                  <Select.Option key={d.serial} value={d.serial}>
+                    {d.serial}
+                  </Select.Option>
+                ))}
+              </Select>
+              <Button icon={<IconRefresh />} loading={encodersLoading} onClick={() => { refreshDevices(); fetchEncoders(encoderSerial, s.videoCodec) }} />
+            </div>
+          </Row>
           <TextRow label="编码器选项" hint="--video-codec-options，key[:type]=value[,...]，详见 Android MediaFormat 文档" placeholder="如 i-frame-interval=10" value={s.videoCodecOptions} onChange={tx('videoCodecOptions')} />
           <NumRow label="视频缓冲(ms)" hint="--video-buffer，加延迟抗抖动，默认 0" min={0} value={s.videoBuffer ?? null} onChange={num('videoBuffer')} />
           <SelectRow label="渲染驱动" hint="--render-driver：direct3d/opengl/opengles2/opengles/metal/software" options={RENDER_DRIVERS} value={s.renderDriver} onChange={sel('renderDriver')} />
@@ -438,6 +612,9 @@ const SettingsPage: React.FC = () => {
           <Section title="应用与限时" />
           <TextRow label="启动应用" hint='--start-app：包名；? 前缀按名称前缀匹配；+ 前缀先强制停止；可组合 +?，如 +?firefox' placeholder="如 com.example.app" value={s.startApp} onChange={tx('startApp')} />
           <NumRow label="镜像时限(秒)" hint="--time-limit：最长投屏时间" min={0} value={s.timeLimit ?? null} onChange={num('timeLimit')} />
+        </Tabs.TabPane>
+        <Tabs.TabPane key="ai" title="AI">
+          <AISettingsPane ai={ai} setAI={setAI} />
         </Tabs.TabPane>
       </Tabs>
     </Card>

@@ -17,6 +17,8 @@ import {
 import {
   CloseEmbed,
   EmbedBack,
+  EmbedFlashBehind,
+  EmbedFlashRestore,
   EmbedHome,
   EmbedNative,
   EmbedNotifications,
@@ -165,10 +167,25 @@ const EmbedScreenPage: React.FC<Props> = ({ serial }) => {
   const shot = async () => {
     try {
       const p = await EmbedScreenshot(serial)
-      Message.success(`已保存: ${p}`)
+      flashBehind(() => Message.success(`已保存: ${p}`))
     } catch (e) {
-      Message.error(`截图失败: ${e}`)
+      flashBehind(() => Message.error(`截图失败: ${e}`))
     }
+  }
+
+  // Windows 原生嵌入时 scrcpy 子窗口盖在 WebView 之上，HTML Message 会被遮住。
+  // 置底闪现 3.5s 让 Message 可见，然后恢复。非嵌入平台直接执行。
+  const flashBehind = async (show: () => void) => {
+    try {
+      await EmbedFlashBehind(serial)
+    } catch {
+      show()
+      return
+    }
+    show()
+    window.setTimeout(() => {
+      EmbedFlashRestore(serial).catch(() => {})
+    }, 3500)
   }
 
   const tools: Array<{

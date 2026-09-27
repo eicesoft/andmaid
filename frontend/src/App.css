@@ -131,20 +131,54 @@ body {
 .settings-card .arco-tabs {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* 设置页：每行 2 个表单项 */
+/* 滚动条走 tabs 内容区内部，不经过卡片圆角 */
+.settings-card .arco-tabs-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 0;
+}
+
+/* 设置页：每行 2 个表单项，列宽随窗口自适应（0 下限防止内容撑开固定宽） */
 .settings-grid .arco-tabs-pane {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: 32px;
   align-content: start;
 }
 
+.settings-grid .arco-tabs-pane > * {
+  min-width: 0;
+}
+
 /* 分区标题独占一行 */
-.settings-grid .arco-tabs-pane .arco-divider {
+.settings-grid .arco-tabs-pane .settings-section {
   grid-column: 1 / -1;
+}
+
+/* 分区标题：左侧 4px 竖线（上下各缩 3px），后空 3px，粗体 */
+.settings-section {
+  position: relative;
+  margin-top: 12px;
+  padding: 6px 0 6px 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  align-self: start;
+}
+
+.settings-section::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 4px;
+  background: rgb(var(--primary-6, 48, 48, 48));
 }
 
 /* 纯图标按钮：透明底 + 深灰图标 */
@@ -175,4 +209,474 @@ body {
 .arco-btn-icon-only.arco-btn-loading,
 .arco-btn-icon-only.arco-btn-disabled {
   color: var(--color-text-4, #c9c9c9) !important;
+}
+
+/* 应用启动下拉列表 */
+.app-picker {
+  width: 440px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+}
+
+.app-picker-status {
+  padding: 16px 8px;
+  text-align: center;
+  color: var(--color-text-3, #86909c);
+  font-size: 13px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.app-picker-error {
+  color: #f53f3f;
+}
+
+.app-picker-list {
+  margin-top: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.app-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.app-picker-item:hover {
+  background: var(--color-fill-2, rgba(0, 0, 0, 0.06));
+}
+
+.app-picker-item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.app-picker-name {
+  font-size: 13px;
+  color: var(--color-text-1, #1d2129);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-picker-pkg {
+  flex-shrink: 0;
+  max-width: 55%;
+  font-size: 11px;
+  color: var(--color-text-3, #86909c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===================== 设备管理表格 ===================== */
+
+/* 紧凑表格：细字号、小内边距、浅描边表头 */
+.device-table .arco-table-container,
+.device-table .arco-table-content {
+  border-radius: 8px;
+}
+
+.device-table .arco-table-th {
+  background: #fafafa;
+  color: var(--color-text-3, #86909c);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 10px !important;
+  border-bottom: 1px solid #ececf1;
+}
+
+.device-table .arco-table-td {
+  padding: 6px 10px !important;
+  font-size: 12px;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.device-table .arco-table-th,
+.device-table .arco-table-td {
+  border-left: none !important;
+  border-right: none !important;
+}
+
+.device-table .arco-table-container {
+  border: 1px solid #ececf1;
+}
+
+.device-table .arco-table-tr:hover .arco-table-td,
+.device-table .arco-table-tr.arco-table-tr-checked .arco-table-td {
+  background: #f7f8fa !important;
+}
+
+/* 设备名称：序列号 + 型号同一行 */
+.device-name-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.device-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-1, #1d2129);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.device-model {
+  font-size: 11px;
+  color: var(--color-text-3, #86909c);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* 状态 pill：浅底色 + 同色圆点 */
+.device-state {  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.device-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.device-state--online {
+  color: #16a34a;
+  background: #ecfdf3;
+}
+
+.device-state--offline {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.device-state--warn {
+  color: #d97706;
+  background: #fffbeb;
+}
+
+.device-state--unknown {
+  color: var(--color-text-3, #86909c);
+  background: #f4f5f6;
+}
+
+/* 首页 adb 状态横条 */
+.adb-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-2, #e5e6eb);
+  border-radius: 8px;
+  background: var(--color-fill-1, #f7f8fa);
+}
+
+.adb-status-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.adb-status-label {
+  font-size: 12px;
+  color: var(--color-text-3, #86909c);
+}
+
+.adb-status-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-1, #1d2129);
+  font-variant-numeric: tabular-nums;
+}
+
+.adb-status-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--color-border-2, #e5e6eb);
+  flex-shrink: 0;
+}
+
+.adb-status-spacer {
+  flex: 1;
+}
+
+.adb-status-bar[data-state='online'] .adb-status-value {
+  color: #16a34a;
+}
+
+.adb-status-bar[data-state='offline'] .adb-status-error {
+  color: #dc2626;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 投屏状态 pill */
+.device-cast {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.device-cast--none {
+  color: var(--color-text-3, #86909c);
+  background: #f4f5f6;
+}
+
+.device-cast--embed {
+  color: #0891b2;
+  background: #ecfeff;
+}
+
+/* 活动投屏会话：可点击关闭 */
+.device-cast--live {
+  color: #2563eb;
+  background: #eff6ff;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.device-cast--live:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+/* ===== 文件管理页 ===== */
+.files-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.files-card > .arco-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.files-card .files-title {
+  flex-shrink: 0;
+}
+
+.files-crumbs {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--color-fill-1);
+  border: 1px solid var(--color-fill-2);
+  border-radius: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.files-crumb {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.files-crumb-sep {
+  margin: 0 2px;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.files-crumb-link {
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-1);
+}
+
+.files-crumb-link:hover {
+  background: var(--color-fill-2);
+  color: rgb(var(--primary-6));
+}
+
+.files-crumb:last-child .files-crumb-link {
+  color: var(--color-text-2);
+  font-weight: 600;
+}
+
+.files-table {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.files-table .arco-table-th {
+  background: transparent;
+}
+
+/* 表格整体淡灰底，行悬浮微加深 */
+.files-table .arco-table-element,
+.files-table .arco-table-tr {
+  background-color: #fafafa;
+}
+
+.files-table .arco-table-tr:hover .arco-table-td {
+  background-color: #f4f4f4;
+}
+
+.files-table .arco-table-td {
+  background-color: transparent;
+}
+
+.files-name {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+  user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.files-name .arco-icon {
+  flex-shrink: 0;
+}
+
+.files-name--dir {
+  cursor: pointer;
+}
+
+.files-name--dir:hover {
+  color: rgb(var(--primary-6));
+}
+
+.files-status {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--color-fill-2);
+  flex-shrink: 0;
+}
+
+.files-status .arco-typography {
+  color: #c2c0bc;
+  font-size: 12px;
+}
+
+.files-upload-bar {
+  position: fixed;
+  right: 20px;
+  bottom: 44px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-fill-3);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ===================== 设备终端（xterm.js） ===================== */
+
+.device-terminal {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 130px);
+  min-height: 320px;
+}
+
+.device-terminal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.device-terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+  background: #1e1e1e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.device-terminal-host .xterm,
+.device-terminal-host .xterm-viewport {
+  border-radius: 8px;
+}
+
+/* xterm 6 自绘滚动条（VS Code scrollable element，非 DOM 原生），
+   ::-webkit-scrollbar 打不中，需覆盖 .slider；宽度由 JS 内联设置须 !important */
+.device-terminal-host .xterm .xterm-scrollable-element > .scrollbar {
+  width: 6px !important;
+}
+
+.device-terminal-host .xterm .xterm-scrollable-element > .scrollbar > .slider {
+  width: 6px !important;
+  left: 0 !important;
+  border-radius: 3px;
+  background: rgba(212, 212, 212, 0.28) !important;
+}
+
+.device-terminal-host .xterm .xterm-scrollable-element > .scrollbar > .slider:hover {
+  background: rgba(212, 212, 212, 0.45) !important;
+}
+
+.device-terminal-host .xterm .xterm-scrollable-element > .scrollbar > .slider.active {
+  background: rgba(212, 212, 212, 0.55) !important;
+}
+
+.device-terminal-quickmenu {
+  min-width: 140px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  padding: 4px;
+}
+
+.device-terminal-quickitem {
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.device-terminal-quickitem:hover {
+  background: var(--color-fill-2, rgba(0, 0, 0, 0.06));
 }

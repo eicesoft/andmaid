@@ -35,6 +35,10 @@ func (a *App) EmbedScreen(serial string, hostTitle string, x, y, w, h int, toolb
 	if err != nil {
 		return err
 	}
+	// scrcpy 内部会执行 adb start-server，先预启避免多进程竞态
+	if err := a.ensureAdbServer(); err != nil {
+		return err
+	}
 
 	settings, err := LoadSettings()
 	if err != nil {
@@ -91,6 +95,22 @@ func (a *App) ResizeEmbed(serial string, x, y, w, h int, toolbarW int) error {
 	if !ok {
 		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
 	}
+	return nil
+}
+
+// EmbedFlashBehind 非 Windows 投屏是独立窗口，HTML 弹层不会被遮挡，空实现。
+func (a *App) EmbedFlashBehind(serial string) error {
+	embedMu.Lock()
+	_, ok := embedProcs[serial]
+	embedMu.Unlock()
+	if !ok {
+		return fmt.Errorf("设备 %s 没有内嵌投屏", serial)
+	}
+	return nil
+}
+
+// EmbedFlashRestore 非 Windows 空实现。
+func (a *App) EmbedFlashRestore(serial string) error {
 	return nil
 }
 

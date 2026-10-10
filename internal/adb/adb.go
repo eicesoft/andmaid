@@ -21,6 +21,24 @@ func init() {
 	if exe, err := os.Executable(); err == nil {
 		toolDir = filepath.Dir(exe)
 	}
+	// GUI 启动（Finder/Dock）不继承 shell PATH，而 scrcpy 内部按名执行 adb
+	// —— 把 adb 所在目录补进进程 PATH，子进程才能找到
+	ensurePATHWithTool("adb")
+}
+
+// ensurePATHWithTool 查找工具，将其所在目录前置到进程 PATH（已含则不动）
+func ensurePATHWithTool(name string) {
+	p := ToolPath(name)
+	if p == "" {
+		return
+	}
+	dir := filepath.Dir(p)
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if d == dir {
+			return
+		}
+	}
+	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // findTool 在常见位置查找 bin 目录下的工具
@@ -52,7 +70,7 @@ func toolName(name string) string {
 	return name
 }
 
-// ToolPath 查找程序目录或 bin 目录下的工具；找不到时回退 PATH
+// ToolPath 查找程序目录或 bin 目录下的工具；找不到时回退 PATH 与常见安装目录
 func ToolPath(name string) string {
 	n := toolName(name)
 	if p, ok := findTool(n); ok {
@@ -61,6 +79,23 @@ func ToolPath(name string) string {
 	// 回退 PATH（macOS/Linux 用户可能用 brew 装了 scrcpy/adb）
 	if p, err := exec.LookPath(n); err == nil {
 		return p
+	}
+	// GUI 启动（Finder/Dock）不继承 shell PATH，补扫常见安装位置
+	return findInCommonDirs(n)
+}
+
+// findInCommonDirs 在常见安装目录中查找工具
+func findInCommonDirs(name string) string {
+	dirs := []string{
+		"/opt/homebrew/bin",                              // macOS Apple Silicon brew
+		"/usr/local/bin",                                 // macOS Intel brew
+		filepath.Join(os.Getenv("HOME"), "Library/Android/sdk/platform-tools"), // Android SDK
+	}
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p
+		}
 	}
 	return ""
 }

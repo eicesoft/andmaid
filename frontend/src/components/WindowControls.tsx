@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { WindowIsMaximised, WindowMinimise, WindowToggleMaximise, Quit } from '../../wailsjs/runtime'
 import { noDragStyle } from '../draggable'
+import { isMac } from '../platform'
 
 const WindowControls: React.FC = () => {
   const [maximized, setMaximized] = useState(false)
@@ -21,6 +22,9 @@ const WindowControls: React.FC = () => {
     WindowToggleMaximise()
     setTimeout(refreshMaximized, 150)
   }
+
+  // macOS 使用原生框架红绿灯，无需自绘按钮
+  if (isMac) return null
 
   return (
     <div className="win-controls" style={noDragStyle}>

@@ -11,6 +11,8 @@ import (
 
 	"andmaid/internal/adb"
 	"andmaid/internal/settings"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Device 一台通过 adb 可见的设备
@@ -64,7 +66,7 @@ func (m *Manager) SetContext(ctx context.Context) { m.ctx = ctx }
 
 func (m *Manager) emit(event string, data ...interface{}) {
 	if m.ctx != nil {
-		m.emit(event, data...)
+		runtime.EventsEmit(m.ctx, event, data...)
 	}
 }
 

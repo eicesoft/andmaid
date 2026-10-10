@@ -3,13 +3,14 @@
 package embed
 
 import (
+	"andmaid/internal/adb"
+	"andmaid/internal/settings"
+
 	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"time"
-
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // 非 Windows 实现（macOS/Linux）：
@@ -133,11 +134,11 @@ func (m *Manager) CloseEmbed(serial string) error {
 func (m *Manager) EmbedStatus() map[string]bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m := make(map[string]bool)
+	out := make(map[string]bool)
 	for s := range m.procs {
-		m[s] = true
+		out[s] = true
 	}
-	return m
+	return out
 }
 
 // platformEmbedHint 前端提示用：说明当前平台内嵌投屏形态

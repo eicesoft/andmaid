@@ -144,3 +144,16 @@ func (m *Manager) EmbedScreenshot(serial string) (string, error) {
 	_, _ = adb.Exec("-s", serial, "shell", "rm", remote)
 	return local, nil
 }
+
+// CloseAll 关闭本进程所有运行中的内嵌投屏（应用退出时兜底，防止 scrcpy 残留）
+func (m *Manager) CloseAll() {
+	m.mu.Lock()
+	serials := make([]string, 0, len(m.procs))
+	for s := range m.procs {
+		serials = append(serials, s)
+	}
+	m.mu.Unlock()
+	for _, s := range serials {
+		_ = m.CloseEmbed(s)
+	}
+}
